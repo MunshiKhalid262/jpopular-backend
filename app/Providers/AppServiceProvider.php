@@ -4,7 +4,13 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Models\Brand;
+use App\Models\Category;
+use App\Models\Product;
 use App\Models\User;
+use App\Policies\BrandPolicy;
+use App\Policies\CategoryPolicy;
+use App\Policies\ProductPolicy;
 use App\Policies\UserPolicy;
 use App\Support\ApiResponse;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -27,6 +33,9 @@ class AppServiceProvider extends ServiceProvider
         // Registered explicitly rather than relying on auto-discovery, so the
         // mapping is greppable. See ARCHITECTURE-V1.md section 12.
         Gate::policy(User::class, UserPolicy::class);
+        Gate::policy(Category::class, CategoryPolicy::class);
+        Gate::policy(Brand::class, BrandPolicy::class);
+        Gate::policy(Product::class, ProductPolicy::class);
 
         $this->configurePasswordPolicy();
         $this->configureRateLimiting();

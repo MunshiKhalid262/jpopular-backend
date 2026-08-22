@@ -28,4 +28,5 @@ Route::get('/health', function () {
 Route::prefix('v1')->as('api.v1.')->group(function (): void {
     require __DIR__.'/api/auth.php';
     require __DIR__.'/api/users.php';
+    require __DIR__.'/api/catalog.php';
 });
