@@ -1,0 +1,151 @@
+name: CI
+
+# Validation only. This workflow never deploys -- see deploy.yml.
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+
+# One CI run per ref. Superseded runs are cancelled: unlike a deployment,
+# abandoning a test run cannot leave anything in a broken state.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: PHP 8.4 tests, migrations and formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      mysql:
+        # The test SUITE runs on SQLite in-memory (see phpunit.xml), which is
+        # fast and hermetic. MySQL is here for a different reason: the products
+        # migration adds CHECK constraints that are applied on MySQL only, so a
+        # SQLite run can never prove that DDL is valid. Migrating against real
+        # MySQL 8 is the only way CI catches a broken constraint before
+        # production does.
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci_root_password
+          MYSQL_DATABASE: jpopular_ci
+          MYSQL_USER: jpopular_ci
+          MYSQL_PASSWORD: ci_only_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          # sqlite3/pdo_sqlite are required: the test suite uses an in-memory
+          # SQLite database. pdo_mysql is required for the migration check.
+          extensions: mbstring, bcmath, intl, zip, dom, curl, pdo, pdo_mysql, pdo_sqlite, sqlite3
+          coverage: none
+          tools: composer:v2
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-php8.4-${{ hashFiles('**/composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-php8.4-
+
+      - name: Install Composer dependencies
+        # Dev dependencies ARE needed here: PHPUnit and Pint live there.
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Create test environment file
+        # A throwaway .env built from the tracked example. Every credential
+        # below is CI-only and matches the ephemeral MySQL service container.
+        # No production value is referenced anywhere in this workflow.
+        run: |
+          cp .env.example .env
+          {
+            echo "APP_ENV=testing"
+            echo "APP_DEBUG=true"
+            echo "DB_CONNECTION=mysql"
+            echo "DB_HOST=127.0.0.1"
+            echo "DB_PORT=3306"
+            echo "DB_DATABASE=jpopular_ci"
+            echo "DB_USERNAME=jpopular_ci"
+            echo "DB_PASSWORD=ci_only_password"
+            echo "CACHE_STORE=array"
+            echo "SESSION_DRIVER=array"
+            echo "QUEUE_CONNECTION=sync"
+            echo "MAIL_MAILER=array"
+          } >> .env
+
+      - name: Generate application key
+        # A fresh throwaway key for this run only. The production APP_KEY is
+        # never known to CI.
+        run: php artisan key:generate
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 30); do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 --silent; then
+              echo "MySQL is ready."
+              exit 0
+            fi
+            echo "Waiting for MySQL ($i/30)..."
+            sleep 2
+          done
+          echo "::error::MySQL did not become ready in time."
+          exit 1
+
+      - name: Run migrations against MySQL 8
+        # Proves the real production DDL applies cleanly, including the
+        # MySQL-only CHECK constraints.
+        run: php artisan migrate --force --no-interaction
+
+      - name: Verify MySQL CHECK constraints were created
+        # Guards against the constraints silently disappearing from the
+        # migration: the test suite runs on SQLite and cannot see them.
+        run: |
+          COUNT=$(mysql -h 127.0.0.1 -P 3306 -u jpopular_ci -pci_only_password \
+            -N -B -e "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+                      WHERE CONSTRAINT_SCHEMA = 'jpopular_ci'
+                        AND TABLE_NAME = 'products'
+                        AND CONSTRAINT_TYPE = 'CHECK';")
+          echo "products CHECK constraints found: $COUNT"
+          if [ "$COUNT" -lt 5 ]; then
+            echo "::error::Expected at least 5 CHECK constraints on products, found $COUNT."
+            exit 1
+          fi
+
+      - name: Seed reference and demo data
+        # APP_ENV=testing is a development-safe environment, so this exercises
+        # the demo seeders too. It also proves the seeders work against MySQL,
+        # not just SQLite.
+        run: php artisan db:seed --force --no-interaction
+
+      - name: Verify production seed path creates no demo data
+        # The safety property is asserted by the test suite as well; checking it
+        # here too means a regression cannot reach main via a green PR that
+        # skipped the relevant test file.
+        run: php artisan test --filter=SeederSafetyTest
+
+      - name: Run test suite
+        run: php artisan test
+
+      - name: Check formatting with Laravel Pint
+        run: ./vendor/bin/pint --test

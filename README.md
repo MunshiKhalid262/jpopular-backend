@@ -215,3 +215,116 @@ app/
 └─ Support/ApiResponse    the response envelope
 routes/api/               one file per module
 ```
+
+## CI/CD
+
+Two separate GitHub Actions workflows. CI never deploys; deployment never runs
+outside `main`.
+
+### Triggers
+
+| Workflow | Runs on | Does |
+|---|---|---|
+| `.github/workflows/ci.yml` | PRs targeting `develop` or `main`, pushes to `develop` | tests, MySQL migration check, Pint |
+| `.github/workflows/deploy.yml` | **pushes to `main`** (plus manual `workflow_dispatch`) | re-verifies, then deploys to the VPS |
+
+Pushes to `develop` and `feature/*`, and pull requests, are validation only —
+they can never reach production.
+
+### Branch strategy
+
+```
+feature/*  ─PR─▶  develop  ─PR─▶  main  ──▶  automatic production deploy
+                  (CI only)              (CI + deploy)
+```
+
+### CI details
+
+The test suite runs on SQLite in-memory (see `phpunit.xml`), so CI also migrates
+against a real **MySQL 8** service container. That is not redundant: the products
+migration adds CHECK constraints on MySQL only, and a SQLite run can never prove
+that DDL is valid. CI asserts at least 5 CHECK constraints exist on `products`.
+
+All CI credentials are throwaway values matching the ephemeral service
+container. CI references **no secrets at all**.
+
+### Production deployment
+
+Runs only after the `verify` job (tests + migrations + Pint) passes, so a broken
+`main` is not deployed. Concurrency group `jpopular-backend-production` with
+`cancel-in-progress: false` — a deploy is never interrupted half-way; a second
+push queues behind the first.
+
+On the VPS, inside `/var/www/jpopular/jpopular-backend`:
+
+1. `php artisan down` (maintenance mode)
+2. `git fetch --prune origin main`, `git checkout main`, `git reset --hard origin/main`
+3. `composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction`
+4. `php artisan migrate --force`
+5. `php artisan storage:link` (only if missing)
+6. `php artisan optimize`
+7. `chmod -R ug+rwX storage bootstrap/cache`
+8. `php artisan up`
+9. health check against `https://api.jpopular.in/api/health` from the runner
+
+**What deployment never does:** create or modify `.env`, regenerate `APP_KEY`,
+run `migrate:fresh` / `db:wipe` / any rollback, run development or demo seeders,
+run `app:create-admin`, or run `git clean`. `git reset --hard` rewrites tracked
+files only, so `.env`, `storage/` contents and uploaded product images survive
+untouched.
+
+Maintenance mode is lifted by an `EXIT` trap that preserves the original exit
+code, so a failed migration or dependency install both **fails the workflow
+visibly** and **leaves the app serving traffic**.
+
+> Because the reset is deterministic, any manual edit to a *tracked* file on the
+> server is discarded on the next deploy. That is intentional — the server always
+> matches `origin/main`.
+
+### Required GitHub secrets
+
+Set these on the repository (or on a `production` environment, which the deploy
+job targets so you can add required reviewers).
+
+| Secret | Required | Purpose |
+|---|---|---|
+| `VPS_HOST` | yes | server hostname or IP |
+| `VPS_USER` | yes | deployment user (e.g. `deploy`) |
+| `VPS_SSH_KEY` | yes | **private** key for that user, PEM, full contents |
+| `VPS_PORT` | no | SSH port; defaults to `22` |
+| `VPS_SSH_KNOWN_HOSTS` | recommended | `ssh-keyscan` output, to pin the host key instead of trusting on first use |
+
+Never store the production `.env`, database credentials, `APP_KEY`, or admin
+credentials as secrets — deployment does not need them.
+
+### Production paths
+
+| | |
+|---|---|
+| Backend | `/var/www/jpopular/jpopular-backend` |
+| API URL | `https://api.jpopular.in` |
+| Health | `https://api.jpopular.in/api/health` |
+
+### Rollback
+
+Deployment is a plain checkout, not a symlinked release, so rollback is a manual
+git operation. **A code rollback is not a database rollback** — reverting
+migrations is a separate, deliberate decision and is never automated.
+
+```bash
+ssh deploy@<host>
+cd /var/www/jpopular/jpopular-backend
+
+git log --oneline -10                  # find the last known-good commit
+php artisan down
+git reset --hard <good-sha>
+composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
+php artisan optimize
+php artisan up
+
+curl -fsS https://api.jpopular.in/api/health
+```
+
+If the bad deploy included a migration, decide explicitly whether the schema
+change is backward compatible. If it is, leave it. If it is not, write a new
+forward migration — do not blind-`rollback` a production database.

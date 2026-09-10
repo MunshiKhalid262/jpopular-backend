@@ -1,0 +1,311 @@
+name: Deploy to production
+
+# Production deploys happen ONLY from main. Pushes to develop, feature
+# branches, and pull requests never reach this workflow.
+on:
+  push:
+    branches: [main]
+  # Manual re-run, still restricted to main by the guard in the deploy job.
+  workflow_dispatch:
+
+# cancel-in-progress is deliberately FALSE. Cancelling a deploy mid-flight
+# could leave the application in maintenance mode, or with dependencies
+# half-installed. A queued deploy waits for the current one to finish.
+concurrency:
+  group: jpopular-backend-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify main before deploying
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci_root_password
+          MYSQL_DATABASE: jpopular_ci
+          MYSQL_USER: jpopular_ci
+          MYSQL_PASSWORD: ci_only_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, bcmath, intl, zip, dom, curl, pdo, pdo_mysql, pdo_sqlite, sqlite3
+          coverage: none
+          tools: composer:v2
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Create test environment file
+        run: |
+          cp .env.example .env
+          {
+            echo "APP_ENV=testing"
+            echo "DB_CONNECTION=mysql"
+            echo "DB_HOST=127.0.0.1"
+            echo "DB_PORT=3306"
+            echo "DB_DATABASE=jpopular_ci"
+            echo "DB_USERNAME=jpopular_ci"
+            echo "DB_PASSWORD=ci_only_password"
+            echo "CACHE_STORE=array"
+            echo "SESSION_DRIVER=array"
+            echo "QUEUE_CONNECTION=sync"
+          } >> .env
+          php artisan key:generate
+
+      - name: Run migrations against MySQL 8
+        run: php artisan migrate --force --no-interaction
+
+      - name: Run test suite
+        run: php artisan test
+
+      - name: Check formatting with Laravel Pint
+        run: ./vendor/bin/pint --test
+
+  deploy:
+    name: Deploy to VPS
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Scope secrets to an environment so reviewers/approvals can be required
+    # in repository settings without changing this file.
+    environment:
+      name: production
+      url: https://api.jpopular.in
+
+    env:
+      DEPLOY_PATH: /var/www/jpopular/jpopular-backend
+      HEALTH_URL: https://api.jpopular.in/api/health
+
+    steps:
+      - name: Guard - refuse to deploy anything but main
+        # Belt and braces alongside the `on:` filter, so a manual dispatch from
+        # another ref cannot reach production.
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Refusing to deploy from ${GITHUB_REF}. Production deploys only from main."
+            exit 1
+          fi
+
+      - name: Deployment summary
+        run: |
+          echo "Application : jpopular-backend"
+          echo "Environment : production"
+          echo "Target      : ${DEPLOY_PATH}"
+          echo "Commit      : ${GITHUB_SHA}"
+          echo "Triggered by: ${GITHUB_ACTOR}"
+          echo "Started     : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+      - name: Configure SSH
+        # Secrets are passed through `env:` rather than interpolated into the
+        # shell text, so they are never part of a command line and cannot be
+        # mangled by quoting.
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          MISSING=""
+          [ -n "${VPS_HOST}" ]    || MISSING="${MISSING} VPS_HOST"
+          [ -n "${VPS_USER}" ]    || MISSING="${MISSING} VPS_USER"
+          [ -n "${VPS_SSH_KEY}" ] || MISSING="${MISSING} VPS_SSH_KEY"
+
+          if [ -n "${MISSING}" ]; then
+            echo "::error::Missing required secrets:${MISSING}"
+            exit 1
+          fi
+
+          # VPS_PORT is optional and defaults to 22.
+          PORT="${VPS_PORT:-22}"
+          echo "SSH_PORT=${PORT}" >> "$GITHUB_ENV"
+          echo "SSH_TARGET=${VPS_USER}@${VPS_HOST}" >> "$GITHUB_ENV"
+          echo "Using SSH port ${PORT}."
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${VPS_SSH_KEY}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          if [ -n "${VPS_SSH_KNOWN_HOSTS}" ]; then
+            # Preferred: the host key is pinned, so nothing in the middle can
+            # impersonate the VPS.
+            printf '%s\n' "${VPS_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+            echo "Host key pinned from VPS_SSH_KNOWN_HOSTS."
+          else
+            # Fallback: trust-on-first-use. Functional, but set
+            # VPS_SSH_KNOWN_HOSTS to remove the trust assumption.
+            ssh-keyscan -p "${PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null
+            echo "::warning::VPS_SSH_KNOWN_HOSTS is not set; the host key was accepted on first use. Add it to pin the host key."
+          fi
+
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Verify SSH connectivity
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "${SSH_PORT}" -o BatchMode=yes \
+            "${SSH_TARGET}" 'echo "Connected as $(whoami) on $(hostname)"'
+
+      - name: Deploy
+        run: |
+          # The remote script arrives on stdin and runs under `bash -s`, taking
+          # the commit SHA and target path as positional arguments. No secret is
+          # interpolated into it.
+          ssh -i ~/.ssh/deploy_key -p "${SSH_PORT}" -o BatchMode=yes \
+            "${SSH_TARGET}" \
+            "bash -s -- '${GITHUB_SHA}' '${DEPLOY_PATH}'" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+
+          COMMIT_SHA="$1"
+          APP_DIR="$2"
+
+          echo "==> Deploying ${COMMIT_SHA} into ${APP_DIR}"
+          cd "${APP_DIR}"
+
+          # Maintenance mode is lifted no matter how this script exits, while
+          # preserving the original exit code so a failure stays a failure.
+          MAINTENANCE_ENABLED=0
+          cleanup() {
+            local code=$?
+            if [ "${MAINTENANCE_ENABLED}" -eq 1 ]; then
+              echo "==> Lifting maintenance mode"
+              php artisan up || echo "WARNING: could not lift maintenance mode automatically."
+            fi
+            if [ "${code}" -ne 0 ]; then
+              echo "==> DEPLOYMENT FAILED with exit code ${code}"
+            fi
+            exit "${code}"
+          }
+          trap cleanup EXIT
+
+          echo "==> Sanity checks"
+          test -f artisan            || { echo "ERROR: artisan not found; wrong directory?"; exit 1; }
+          test -f .env               || { echo "ERROR: .env missing. Deployment does not create it."; exit 1; }
+          test -d .git               || { echo "ERROR: not a git repository."; exit 1; }
+          echo "    ok"
+
+          echo "==> Current commit: $(git rev-parse --short HEAD)"
+
+          echo "==> Entering maintenance mode"
+          # /api/health is deliberately NOT excluded: while the app is down it
+          # must report unhealthy. The health check runs after `up`.
+          php artisan down --retry=15 || true
+          MAINTENANCE_ENABLED=1
+
+          echo "==> Fetching origin"
+          git fetch --prune origin main
+
+          echo "==> Checking out main"
+          git checkout main
+
+          echo "==> Resetting to origin/main (deterministic, not 'whatever is checked out')"
+          # `reset --hard` rewrites TRACKED files only. It does not touch
+          # untracked or ignored paths, so .env, storage/ contents and uploaded
+          # product images survive. `git clean` is deliberately NOT used: it
+          # would delete exactly those production files.
+          git reset --hard "origin/main"
+
+          DEPLOYED_SHA="$(git rev-parse HEAD)"
+          echo "==> Now at: $(git rev-parse --short HEAD)"
+
+          if [ "${DEPLOYED_SHA}" != "${COMMIT_SHA}" ]; then
+            echo "WARNING: origin/main is ${DEPLOYED_SHA}, workflow commit was ${COMMIT_SHA}."
+            echo "         A newer commit landed on main; deploying origin/main."
+          fi
+
+          echo "==> Installing production Composer dependencies"
+          composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
+
+          echo "==> Running database migrations"
+          # Forward-only. migrate:fresh, db:wipe and rollback are never run
+          # here: a code rollback and a database rollback are different
+          # operations and the latter is not safe to automate.
+          php artisan migrate --force --no-interaction
+
+          echo "==> Ensuring storage symlink"
+          if [ -L public/storage ] || [ -d public/storage ]; then
+            echo "    already present"
+          else
+            php artisan storage:link
+          fi
+
+          echo "==> Rebuilding caches"
+          php artisan optimize
+
+          echo "==> Normalising writable permissions"
+          # Group-writable only, and no chown: the deploy user owns this tree,
+          # so no sudo is needed. Uploaded files are not deleted or replaced.
+          chmod -R ug+rwX storage bootstrap/cache || \
+            echo "WARNING: could not adjust permissions on storage/bootstrap-cache."
+
+          echo "==> Lifting maintenance mode"
+          php artisan up
+          MAINTENANCE_ENABLED=0
+
+          echo "==> Deployment steps completed at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          REMOTE_SCRIPT
+
+      - name: Health check
+        # A deploy that leaves the API unreachable is a failed deploy, so this
+        # step is allowed to fail the job.
+        run: |
+          echo "Checking ${HEALTH_URL}"
+          ATTEMPTS=12
+          DELAY=5
+
+          for i in $(seq 1 "${ATTEMPTS}"); do
+            # One request per attempt: body to a file, status code to stdout.
+            STATUS=$(curl -s -o /tmp/health_body.txt -w '%{http_code}' \
+                       --max-time 10 "${HEALTH_URL}" || echo "000")
+            BODY=$(cat /tmp/health_body.txt 2>/dev/null || true)
+
+            if [ "${STATUS}" = "200" ] && printf '%s' "${BODY}" | grep -q '"success":true'; then
+              echo "Health check passed on attempt ${i}: HTTP ${STATUS}"
+              echo "Response: ${BODY}"
+              exit 0
+            fi
+
+            echo "Attempt ${i}/${ATTEMPTS}: HTTP ${STATUS}. Retrying in ${DELAY}s..."
+            sleep "${DELAY}"
+          done
+
+          echo "Last response body:"
+          cat /tmp/health_body.txt 2>/dev/null || echo "(empty)"
+
+          echo "::error::Health check failed after ${ATTEMPTS} attempts. ${HEALTH_URL} did not return a healthy response."
+          exit 1
+
+      - name: Report result
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "Backend deployment SUCCEEDED for ${GITHUB_SHA}"
+          else
+            echo "Backend deployment FAILED for ${GITHUB_SHA} (status: ${{ job.status }})"
+            echo "The application was taken out of maintenance mode by the remote script's exit trap."
+            echo "See ROLLBACK in README.md if production is left in a bad state."
+          fi
+
+      - name: Remove SSH key from runner
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
