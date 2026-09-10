@@ -194,20 +194,59 @@ class ProductImageTest extends ApiTestCase
     }
 
     #[Test]
-    public function archiving_a_product_keeps_its_image(): void
+    public function archiving_a_product_deletes_its_image(): void
     {
         Sanctum::actingAs($this->admin());
 
         $this->post('/api/v1/products', $this->payload([
-            'image' => UploadedFile::fake()->image('keep.jpg'),
+            'image' => UploadedFile::fake()->image('gone.jpg'),
         ]))->assertStatus(201);
 
         $product = Product::firstOrFail();
         $path = $product->image_path;
 
+        Storage::disk(ProductImageStore::DISK)->assertExists($path);
+
         $this->deleteJson("/api/v1/products/{$product->id}")->assertOk();
 
-        // Archived, not destroyed: historical invoices may still show it.
-        Storage::disk(ProductImageStore::DISK)->assertExists($path);
+        // The file is removed for good, so archiving reclaims its storage.
+        Storage::disk(ProductImageStore::DISK)->assertMissing($path);
+    }
+
+    #[Test]
+    public function archiving_a_product_clears_its_image_path(): void
+    {
+        Sanctum::actingAs($this->admin());
+
+        $this->post('/api/v1/products', $this->payload([
+            'image' => UploadedFile::fake()->image('gone.jpg'),
+        ]))->assertStatus(201);
+
+        $product = Product::firstOrFail();
+
+        $this->deleteJson("/api/v1/products/{$product->id}")->assertOk();
+
+        // The row outlives the file, so it must not keep pointing at it:
+        // a restored product would otherwise render a broken image URL.
+        $archived = Product::withTrashed()->findOrFail($product->id);
+
+        $this->assertNull($archived->image_path);
+        $this->assertNotNull($archived->deleted_at);
+    }
+
+    #[Test]
+    public function archiving_a_product_without_an_image_still_succeeds(): void
+    {
+        Sanctum::actingAs($this->admin());
+
+        $this->postJson('/api/v1/products', $this->payload())->assertStatus(201);
+
+        $product = Product::firstOrFail();
+
+        $this->assertNull($product->image_path);
+
+        $this->deleteJson("/api/v1/products/{$product->id}")->assertOk();
+
+        $this->assertSoftDeleted('products', ['id' => $product->id]);
     }
 }

@@ -103,12 +103,32 @@ final class ManageProduct
     }
 
     /**
-     * Archive (soft delete). The image file is retained: historical invoices
-     * may still reference the product, and an archived product can be restored.
+     * Archive (soft delete) and permanently remove the image file.
+     *
+     * The row survives and can be restored, but its image cannot: the file is
+     * gone for good. `image_path` is therefore cleared in the same
+     * transaction, so a restored product reports no image instead of pointing
+     * at a missing file and rendering a broken URL.
+     *
+     * Historical invoices are unaffected: invoice lines snapshot the product's
+     * name, SKU, HSN code and unit at the time of sale, never its image.
      */
     public function archive(Product $product): void
     {
-        $product->delete();
+        $previousImage = $product->image_path;
+
+        DB::transaction(function () use ($product): void {
+            if ($product->image_path !== null) {
+                $product->image_path = null;
+                $product->save();
+            }
+
+            $product->delete();
+        });
+
+        // Deleted only AFTER the row commits, mirroring update(): a rolled-back
+        // archive must never leave a product pointing at a file already gone.
+        $this->images->delete($previousImage);
     }
 
     /**
