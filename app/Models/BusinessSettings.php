@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\Cache;
  */
 class BusinessSettings extends Model
 {
-    /** Fixed id: the CHECK constraint on MySQL enforces a single row. */
+    /** Fixed id: the unique `singleton` column enforces a single row. */
     public const SINGLETON_ID = 1;
 
     private const CACHE_KEY = 'business_settings';

@@ -2,7 +2,6 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -56,13 +55,21 @@ return new class extends Migration
             $table->boolean('enable_round_off')->default(true);
             $table->unsignedTinyInteger('financial_year_start_month')->default(4);
 
+            // Single row, enforced by the database on EVERY driver.
+            //
+            // The obvious spelling, CHECK (id = 1), is not portable: MySQL
+            // rejects a CHECK that refers to an AUTO_INCREMENT column with
+            // error 3818, so that constraint could never be created here. A
+            // constant column with a unique index gives the same guarantee --
+            // the second insert always collides on the default value of 1 --
+            // and it behaves identically on MySQL and SQLite, so the test
+            // suite actually exercises it rather than skipping a MySQL-only
+            // branch.
+            $table->unsignedTinyInteger('singleton')->default(1);
+            $table->unique('singleton', 'business_settings_single_row');
+
             $table->timestamps();
         });
-
-        // Single row, enforced at the database level on MySQL.
-        if (DB::getDriverName() === 'mysql') {
-            DB::statement('ALTER TABLE business_settings ADD CONSTRAINT business_settings_single_row CHECK (id = 1)');
-        }
     }
 
     public function down(): void
