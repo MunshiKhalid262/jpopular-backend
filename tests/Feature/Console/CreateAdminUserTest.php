@@ -38,7 +38,7 @@ class CreateAdminUserTest extends TestCase
         $this->assertTrue($user->hasRole('admin'));
         $this->assertTrue($user->is_active);
         $this->assertTrue(Hash::check(self::STRONG_PASSWORD, $user->password));
-        $this->assertSame(37, $user->getAllPermissions()->count());
+        $this->assertSame(41, $user->getAllPermissions()->count());
     }
 
     #[Test]

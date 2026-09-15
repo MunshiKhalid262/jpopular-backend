@@ -6,6 +6,7 @@ use App\Enums\PermissionName;
 use App\Http\Controllers\Api\V1\Sales\CustomerController;
 use App\Http\Controllers\Api\V1\Sales\InvoiceController;
 use App\Http\Controllers\Api\V1\Sales\InvoiceDocumentController;
+use App\Http\Controllers\Api\V1\Sales\PaymentController;
 use App\Http\Controllers\Api\V1\Settings\BusinessSettingsController;
 use Illuminate\Support\Facades\Route;
 
@@ -64,6 +65,27 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
             ->middleware('can:'.PermissionName::InvoicesPrint->value)->name('pdf.inline');
         Route::get('{invoice}/preview', [InvoiceDocumentController::class, 'preview'])
             ->middleware('can:'.PermissionName::InvoicesPrint->value)->name('preview');
+    });
+
+    /*
+     * Payments. A payment is always taken against a specific invoice, so
+     * recording is nested under it; listing and voiding are top-level because
+     * they span invoices.
+     *
+     * There is no update or delete route: a financial record is VOIDED with a
+     * reason, never edited away.
+     */
+    Route::post('invoices/{invoice}/payments', [PaymentController::class, 'store'])
+        ->middleware('can:'.PermissionName::PaymentsRecord->value)
+        ->name('invoices.payments.store');
+
+    Route::prefix('payments')->as('payments.')->group(function (): void {
+        Route::get('/', [PaymentController::class, 'index'])
+            ->middleware('can:'.PermissionName::PaymentsView->value)->name('index');
+        Route::get('methods', [PaymentController::class, 'methods'])
+            ->middleware('can:'.PermissionName::PaymentsView->value)->name('methods');
+        Route::post('{payment}/void', [PaymentController::class, 'void'])
+            ->middleware('can:'.PermissionName::PaymentsVoid->value)->name('void');
     });
 
     Route::prefix('settings')->as('settings.')->group(function (): void {

@@ -50,11 +50,24 @@ enum PermissionName: string
     case PaymentsRecord = 'payments.record';
     case PaymentsVoid = 'payments.void';
 
-    // Reports
+    /*
+     * Reports.
+     *
+     * `reports.view` is the coarse gate on the Reports section itself; the
+     * others gate individual reports. They are deliberately separate because
+     * inventory reporting and financial reporting are different sensitivities
+     * -- a manager who may see stock levels is not thereby entitled to the
+     * sales ledger or receivables.
+     */
+    case ReportsView = 'reports.view';
     case ReportsSales = 'reports.sales';
     case ReportsProductWise = 'reports.product_wise';
     case ReportsStock = 'reports.stock';
     case ReportsGst = 'reports.gst';
+    case ReportsPayments = 'reports.payments';
+    case ReportsInventory = 'reports.inventory';
+    /** Exporting is separable: reading a report on screen is not downloading it. */
+    case ReportsExport = 'reports.export';
 
     // Administration
     case UsersView = 'users.view';
@@ -119,9 +132,21 @@ enum PermissionName: string
             self::PaymentsView,
             self::PaymentsRecord,
 
+            /*
+             * Operational reporting only.
+             *
+             * A manager raises invoices and runs the shop floor, so they get
+             * the Reports section, their own sales figures, product movement
+             * and stock. reports.gst, reports.payments and reports.export stay
+             * with the Admin: tax position, cash collected and bulk extraction
+             * of the whole ledger are the owner's business, and stock access
+             * must not become financial access by the back door.
+             */
+            self::ReportsView,
             self::ReportsSales,
             self::ReportsProductWise,
             self::ReportsStock,
+            self::ReportsInventory,
 
             self::SettingsView,
         ]);

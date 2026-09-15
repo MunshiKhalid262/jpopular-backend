@@ -69,6 +69,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Business Timezone
+    |--------------------------------------------------------------------------
+    |
+    | Timestamps are stored in UTC (above) and that does not change. This is
+    | the timezone the BUSINESS operates in, and it is what decides where a
+    | report's day and month boundaries fall.
+    |
+    | The two differ by 5.5 hours, so a sale at 02:00 IST belongs to the
+    | previous UTC day: computing "today's sales" in UTC would file the
+    | morning's takings under yesterday. Every report goes through
+    | App\Support\BusinessPeriod, which builds its boundaries here and converts
+    | to UTC for the query.
+    |
+    */
+
+    'business_timezone' => env('BUSINESS_TIMEZONE', 'Asia/Kolkata'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
     |

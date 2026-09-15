@@ -31,4 +31,5 @@ Route::prefix('v1')->as('api.v1.')->group(function (): void {
     require __DIR__.'/api/catalog.php';
     require __DIR__.'/api/inventory.php';
     require __DIR__.'/api/sales.php';
+    require __DIR__.'/api/reporting.php';
 });

@@ -130,7 +130,7 @@ class SeederSafetyTest extends TestCase
         // Roles and permissions ARE required in production.
         $this->assertTrue(Role::query()->where('name', 'admin')->exists());
         $this->assertTrue(Role::query()->where('name', 'manager')->exists());
-        $this->assertSame(37, Permission::count());
+        $this->assertSame(41, Permission::count());
 
         // Nothing else. No users, no catalog.
         $this->assertSame(0, User::withTrashed()->count());
@@ -196,8 +196,10 @@ class SeederSafetyTest extends TestCase
         $admin = Role::findByName('admin', 'web');
         $manager = Role::findByName('manager', 'web');
 
-        $this->assertSame(37, $admin->permissions()->count());
-        $this->assertSame(18, $manager->permissions()->count());
+        // Pinned deliberately: a change to either number should be a decision,
+        // not something that slips in with an unrelated slice.
+        $this->assertSame(41, $admin->permissions()->count());
+        $this->assertSame(20, $manager->permissions()->count());
 
         // Catalog specifics relied on by this slice.
         $this->assertTrue($manager->hasPermissionTo('products.view'));
@@ -205,5 +207,18 @@ class SeederSafetyTest extends TestCase
         $this->assertFalse($manager->hasPermissionTo('categories.manage'));
         $this->assertFalse($manager->hasPermissionTo('products.create'));
         $this->assertFalse($manager->hasPermissionTo('products.view_purchase_price'));
+
+        /*
+         * Reporting: a manager runs the shop floor, so they get the Reports
+         * section and operational reports. The tax position, cash collected
+         * and bulk export stay with the Admin, so stock access cannot become
+         * financial access.
+         */
+        $this->assertTrue($manager->hasPermissionTo('reports.view'));
+        $this->assertTrue($manager->hasPermissionTo('reports.inventory'));
+        $this->assertTrue($manager->hasPermissionTo('reports.sales'));
+        $this->assertFalse($manager->hasPermissionTo('reports.gst'));
+        $this->assertFalse($manager->hasPermissionTo('reports.payments'));
+        $this->assertFalse($manager->hasPermissionTo('reports.export'));
     }
 }
