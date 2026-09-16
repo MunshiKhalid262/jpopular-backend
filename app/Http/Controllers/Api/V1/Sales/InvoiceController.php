@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1\Sales;
 use App\Domain\Sales\Actions\CancelInvoice;
 use App\Domain\Sales\Actions\FinalizeInvoice;
 use App\Domain\Sales\Actions\ManageInvoice;
+use App\Domain\Sales\Data\InvoiceChargeInput;
 use App\Domain\Sales\Data\InvoiceLineInput;
 use App\Enums\InvoiceStatus;
 use App\Enums\TaxType;
@@ -73,7 +74,7 @@ class InvoiceController extends Controller
         $this->authorize('view', $invoice);
 
         return ApiResponse::success(
-            new InvoiceResource($invoice->load(['customer', 'items']))
+            new InvoiceResource($invoice->load(['customer', 'items', 'charges']))
         );
     }
 
@@ -84,10 +85,11 @@ class InvoiceController extends Controller
             lines: $request->lineInputs(),
             actor: $request->user(),
             invoiceDiscount: $request->invoiceDiscount(),
+            charges: $request->chargeInputs(),
         );
 
         return ApiResponse::success(
-            new InvoiceResource($invoice->load(['customer', 'items'])),
+            new InvoiceResource($invoice->load(['customer', 'items', 'charges'])),
             status: 201,
         );
     }
@@ -99,9 +101,10 @@ class InvoiceController extends Controller
             attributes: $request->invoiceAttributes(),
             lines: $request->lineInputs(),
             invoiceDiscount: $request->invoiceDiscount(),
+            charges: $request->chargeInputs(),
         );
 
-        return ApiResponse::success(new InvoiceResource($updated->load(['customer', 'items'])));
+        return ApiResponse::success(new InvoiceResource($updated->load(['customer', 'items', 'charges'])));
     }
 
     /**
@@ -132,7 +135,17 @@ class InvoiceController extends Controller
             ->map(fn ($item, $index): InvoiceLineInput => new InvoiceLineInput(
                 product: Product::query()->findOrFail($item->product_id),
                 quantity: (string) $item->quantity,
-                unitPrice: (string) $item->unit_price,
+                /*
+                 * The price AS ENTERED, not the net price.
+                 *
+                 * Under tax-inclusive pricing `unit_price` is already the
+                 * taxable rate the draft's composition backed out of the
+                 * entered figure. Feeding that back in would divide by
+                 * (1 + rate) a second time and quietly under-bill: 36,000
+                 * would become 34,285.71 and then 32,653.06. `unit_price_gross`
+                 * is stored precisely so re-composition is idempotent.
+                 */
+                unitPrice: (string) $item->unit_price_gross,
                 sortOrder: (int) ($item->sort_order ?? $index),
             ))
             ->values()
@@ -143,9 +156,18 @@ class InvoiceController extends Controller
             lines: $lines,
             actor: $request->user(),
             invoiceDiscount: (string) $invoice->discount_amount,
+            // Re-read from the draft, like the lines: finalization issues the
+            // invoice that was reviewed, not whatever arrives at the last moment.
+            charges: $invoice->charges()->get()->map(fn ($charge, $i) => new InvoiceChargeInput(
+                description: (string) $charge->description,
+                amount: (string) $charge->taxable_amount,
+                gstRate: (string) $charge->gst_rate,
+                hsnCode: $charge->hsn_code,
+                sortOrder: (int) ($charge->sort_order ?? $i),
+            ))->values()->all(),
         );
 
-        return ApiResponse::success(new InvoiceResource($finalized->load(['customer', 'items'])));
+        return ApiResponse::success(new InvoiceResource($finalized->load(['customer', 'items', 'charges'])));
     }
 
     /**
@@ -163,7 +185,7 @@ class InvoiceController extends Controller
 
         $cancelled = $action->handle($invoice, $validated['reason'], $request->user());
 
-        return ApiResponse::success(new InvoiceResource($cancelled->load(['customer', 'items'])));
+        return ApiResponse::success(new InvoiceResource($cancelled->load(['customer', 'items', 'charges'])));
     }
 
     /** Supporting data for the invoice form. */

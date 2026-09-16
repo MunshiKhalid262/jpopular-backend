@@ -46,7 +46,9 @@ class BusinessSettings extends Model
         'email',
         'website',
         'invoice_prefix',
+        'dealer_invoice_prefix',
         'invoice_terms',
+        'invoice_declaration',
         'bank_name',
         'bank_account_name',
         'bank_account_number',
@@ -57,6 +59,7 @@ class BusinessSettings extends Model
         'default_tax_type',
         'currency',
         'enable_round_off',
+        'prices_include_tax',
         'financial_year_start_month',
     ];
 
@@ -68,6 +71,7 @@ class BusinessSettings extends Model
         return [
             'default_gst_rate' => 'decimal:2',
             'enable_round_off' => 'boolean',
+            'prices_include_tax' => 'boolean',
             'financial_year_start_month' => 'integer',
         ];
     }

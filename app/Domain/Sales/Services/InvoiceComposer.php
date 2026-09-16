@@ -9,6 +9,7 @@ use App\Domain\Sales\Data\InvoiceTotals;
 use App\Enums\TaxType;
 use App\Models\BusinessSettings;
 use App\Models\Invoice;
+use App\Models\InvoiceCharge;
 use App\Models\InvoiceItem;
 
 /**
@@ -36,8 +37,12 @@ final class InvoiceComposer
      *
      * @param  list<InvoiceLineInput>  $lines
      */
-    public function apply(Invoice $invoice, array $lines, string $invoiceDiscount = '0'): InvoiceTotals
-    {
+    public function apply(
+        Invoice $invoice,
+        array $lines,
+        string $invoiceDiscount = '0',
+        array $charges = [],
+    ): InvoiceTotals {
         $settings = BusinessSettings::current();
 
         /*
@@ -56,6 +61,14 @@ final class InvoiceComposer
             supplyType: $supplyType,
             invoiceDiscount: $invoiceDiscount,
             roundOffEnabled: (bool) $settings->enable_round_off,
+            /*
+             * From the INVOICE, not from settings. The value was snapshotted
+             * when the invoice was created, so re-composing a draft -- or
+             * finalizing one raised before the shop switched pricing modes --
+             * reproduces the arithmetic it was started under.
+             */
+            pricesIncludeTax: (bool) $invoice->prices_include_tax,
+            charges: $charges,
         );
 
         $invoice->forceFill([
@@ -94,6 +107,7 @@ final class InvoiceComposer
 
                 'quantity' => $line->quantity,
                 'unit_price' => $line->unitPrice,
+                'unit_price_gross' => $line->unitPriceGross,
                 'gst_rate' => $line->gstRate,
 
                 'line_subtotal' => $line->lineSubtotal,
@@ -110,6 +124,32 @@ final class InvoiceComposer
                 'tax_amount' => $line->taxAmount,
                 'line_total' => $line->lineTotal,
                 'sort_order' => $line->sortOrder,
+            ])->save();
+        }
+
+        // Charges are replaced wholesale alongside the lines, for the same
+        // reason: a draft's are provisional and a partial update could leave a
+        // stale row behind.
+        $invoice->charges()->delete();
+
+        foreach ($totals->charges as $charge) {
+            $row = new InvoiceCharge;
+
+            $row->forceFill([
+                'invoice_id' => $invoice->getKey(),
+                'description' => $charge->description,
+                'hsn_code' => $charge->hsnCode,
+                'taxable_amount' => $charge->taxableAmount,
+                'gst_rate' => $charge->gstRate,
+                'cgst_rate' => $charge->cgstRate,
+                'cgst_amount' => $charge->cgstAmount,
+                'sgst_rate' => $charge->sgstRate,
+                'sgst_amount' => $charge->sgstAmount,
+                'igst_rate' => $charge->igstRate,
+                'igst_amount' => $charge->igstAmount,
+                'tax_amount' => $charge->taxAmount,
+                'total' => $charge->total,
+                'sort_order' => $charge->sortOrder,
             ])->save();
         }
 

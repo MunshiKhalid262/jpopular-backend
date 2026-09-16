@@ -353,18 +353,29 @@ class InvoiceApiTest extends ApiTestCase
         $this->putJson('/api/v1/settings/business', [
             'business_name' => 'JPopular Motors Pvt Ltd',
             'state_code' => '29',
-            'invoice_prefix' => 'JPM',
+            'invoice_prefix' => 'JM',
+            'dealer_invoice_prefix' => 'JD',
         ])
             ->assertOk()
             ->assertJsonPath('data.business_name', 'JPopular Motors Pvt Ltd')
-            ->assertJsonPath('data.state_code', '29');
+            ->assertJsonPath('data.state_code', '29')
+            ->assertJsonPath('data.dealer_invoice_prefix', 'JD');
 
-        // Over-long prefixes would breach the GST 16-character invoice number
-        // limit, so they are refused here rather than at allocation time.
-        $this->putJson('/api/v1/settings/business', [
-            'business_name' => 'X',
-            'invoice_prefix' => 'TOOLONG',
-        ])->assertStatus(422)->assertJsonValidationErrors('invoice_prefix');
+        /*
+         * Two characters is the real limit, not four.
+         *
+         * The number format is {prefix}/{2026-27}/{00001}, and GST allows 16
+         * characters, so even a 3-character prefix produces 17 and the
+         * generator throws at allocation time -- after the operator has
+         * already built the invoice. Refusing it in settings is the only
+         * place the message can be acted on.
+         */
+        foreach (['JPM', 'TOOLONG'] as $tooLong) {
+            $this->putJson('/api/v1/settings/business', [
+                'business_name' => 'X',
+                'invoice_prefix' => $tooLong,
+            ])->assertStatus(422)->assertJsonValidationErrors('invoice_prefix');
+        }
     }
 
     #[Test]

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Sales\Services;
 
+use App\Domain\Sales\Data\InvoiceChargeInput;
+use App\Domain\Sales\Data\InvoiceChargeTotals;
 use App\Domain\Sales\Data\InvoiceLineInput;
 use App\Domain\Sales\Data\InvoiceLineTotals;
 use App\Domain\Sales\Data\InvoiceTotals;
@@ -45,6 +47,8 @@ final class TaxCalculator
     /**
      * @param  list<InvoiceLineInput>  $lines
      * @param  string  $invoiceDiscount  flat amount off the whole invoice
+     * @param  bool  $pricesIncludeTax  the entered unit prices already contain GST
+     * @param  list<InvoiceChargeInput>  $charges  optional extra charges, taxed at their own rate
      */
     public function calculate(
         array $lines,
@@ -52,13 +56,38 @@ final class TaxCalculator
         ?SupplyType $supplyType,
         string $invoiceDiscount = '0',
         bool $roundOffEnabled = false,
+        bool $pricesIncludeTax = false,
+        array $charges = [],
     ): InvoiceTotals {
         // ---- 1. line subtotals and the invoice subtotal -----------------
         $subtotal = Money::zero();
         $lineSubtotals = [];
+        $netUnitPrices = [];
 
         foreach ($lines as $index => $line) {
-            $lineSubtotal = Money::of($line->unitPrice)->times($line->quantity)->round();
+            /*
+             * TAX-INCLUSIVE PRICING.
+             *
+             * When the entered price already contains GST, the taxable value
+             * is backed out of it: 36,000 at 5% is 34,285.71 plus 1,714.29.
+             *
+             * The division happens PER UNIT and is rounded before multiplying
+             * by the quantity, not the other way round. That ordering is what
+             * makes the printed "Rate" column multiply cleanly to the printed
+             * "Amount": 34,285.71 x 6 = 2,05,714.26, where dividing the gross
+             * line total instead would give 2,05,714.29 and an invoice whose
+             * own columns do not reconcile.
+             */
+            $netUnitPrice = $this->netUnitPrice(
+                $line->unitPrice,
+                (string) $line->product->gst_rate,
+                $taxType,
+                $pricesIncludeTax,
+            );
+
+            $netUnitPrices[$index] = $netUnitPrice;
+
+            $lineSubtotal = $netUnitPrice->times($line->quantity)->round();
             $lineSubtotals[$index] = $lineSubtotal;
             $subtotal = $subtotal->plus($lineSubtotal);
         }
@@ -122,7 +151,17 @@ final class TaxCalculator
                 hsnCode: $line->product->hsn_code,
                 unit: $line->product->unit,
                 quantity: bcadd($line->quantity, '0', 3),
-                unitPrice: Money::of($line->unitPrice)->toString(),
+                // The TAXABLE rate, which is what every downstream total is
+                // built from.
+                unitPrice: $netUnitPrices[$index]->toString(),
+                /*
+                 * The price as entered. Under tax-inclusive pricing this is
+                 * the customer-facing figure and differs from unitPrice; under
+                 * tax-exclusive pricing the two are the same. Snapshotted so
+                 * the printed "Rate (Incl. of Tax)" column is a stored fact
+                 * rather than something re-derived at print time.
+                 */
+                unitPriceGross: Money::of($line->unitPrice)->toString(),
                 // Snapshot the configured rate even on a non-GST bill: it
                 // records what the rate WAS, never what was charged.
                 gstRate: Money::of($productRate)->toString(),
@@ -146,6 +185,26 @@ final class TaxCalculator
             $igstTotal = $igstTotal->plus($igst);
         }
 
+        /*
+         * ---- 5b. additional charges --------------------------------------
+         *
+         * Taxed at their OWN rate, after the goods and after the discount: an
+         * insurance charge is an 18% service on a 5% scooter sale, and a
+         * discount negotiated on the goods does not reduce it.
+         */
+        $computedCharges = [];
+
+        foreach ($charges as $index => $charge) {
+            $computed = $this->computeCharge($charge, $index, $taxType, $supplyType);
+
+            $computedCharges[] = $computed;
+
+            $taxableTotal = $taxableTotal->plus(Money::of($computed->taxableAmount));
+            $cgstTotal = $cgstTotal->plus(Money::of($computed->cgstAmount));
+            $sgstTotal = $sgstTotal->plus(Money::of($computed->sgstAmount));
+            $igstTotal = $igstTotal->plus(Money::of($computed->igstAmount));
+        }
+
         $taxableTotal = $taxableTotal->round();
         $cgstTotal = $cgstTotal->round();
         $sgstTotal = $sgstTotal->round();
@@ -162,6 +221,7 @@ final class TaxCalculator
             // Meaningless on a non-GST bill, so recorded as null.
             supplyType: $taxType === TaxType::Gst ? $supplyType : null,
             lines: $computedLines,
+            charges: $computedCharges,
             subtotal: $subtotal->toString(),
             discountAmount: $discount->toString(),
             taxableAmount: $taxableTotal->toString(),
@@ -172,6 +232,88 @@ final class TaxCalculator
             roundOff: $roundOff->toString(),
             grandTotal: $grandTotal->toString(),
         );
+    }
+
+    /**
+     * One additional charge, taxed at its own rate.
+     */
+    private function computeCharge(
+        InvoiceChargeInput $charge,
+        int $index,
+        TaxType $taxType,
+        ?SupplyType $supplyType,
+    ): InvoiceChargeTotals {
+        $taxable = Money::of($charge->amount)->round();
+        $rate = $charge->gstRate;
+
+        $cgstRate = Money::zero();
+        $sgstRate = Money::zero();
+        $igstRate = Money::zero();
+        $cgst = Money::zero();
+        $sgst = Money::zero();
+        $igst = Money::zero();
+
+        if ($taxType === TaxType::Gst) {
+            if ($supplyType === SupplyType::InterState) {
+                $igstRate = Money::of($rate);
+                $igst = $taxable->percentage($rate)->round();
+            } else {
+                $half = Money::of($rate)->dividedBy('2');
+                $cgstRate = $half;
+                $sgstRate = $half;
+                $cgst = $taxable->percentage($half->toRawString())->round();
+                $sgst = $taxable->percentage($half->toRawString())->round();
+            }
+        }
+
+        $taxAmount = $cgst->plus($sgst)->plus($igst)->round();
+
+        return new InvoiceChargeTotals(
+            description: $charge->description,
+            hsnCode: $charge->hsnCode,
+            taxableAmount: $taxable->toString(),
+            gstRate: Money::of($rate)->toString(),
+            cgstRate: $cgstRate->toString(),
+            cgstAmount: $cgst->toString(),
+            sgstRate: $sgstRate->toString(),
+            sgstAmount: $sgst->toString(),
+            igstRate: $igstRate->toString(),
+            igstAmount: $igst->toString(),
+            taxAmount: $taxAmount->toString(),
+            total: $taxable->plus($taxAmount)->round()->toString(),
+            sortOrder: $charge->sortOrder !== 0 ? $charge->sortOrder : $index,
+        );
+    }
+
+    /**
+     * The taxable unit price.
+     *
+     * Tax-exclusive pricing returns the entered price unchanged. Tax-inclusive
+     * pricing divides the GST back out, rounded to 2 dp per unit.
+     *
+     * A non-GST bill charges no tax, so there is nothing to remove and the
+     * entered price IS the taxable price whichever mode is configured.
+     */
+    private function netUnitPrice(
+        string $unitPrice,
+        string $gstRate,
+        TaxType $taxType,
+        bool $pricesIncludeTax,
+    ): Money {
+        $price = Money::of($unitPrice);
+
+        if (! $pricesIncludeTax || $taxType !== TaxType::Gst) {
+            return $price;
+        }
+
+        // 1 + rate/100, e.g. 5% -> 1.05. A zero-rated line divides by 1.
+        $divisor = bcadd('1', bcdiv($gstRate, '100', 8), 8);
+
+        if (bccomp($divisor, '0', 8) <= 0) {
+            return $price;
+        }
+
+        return $price->dividedBy($divisor)->round();
     }
 
     /**

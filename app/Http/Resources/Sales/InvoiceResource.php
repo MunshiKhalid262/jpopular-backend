@@ -27,6 +27,12 @@ class InvoiceResource extends JsonResource
             'financial_year' => $this->financial_year,
             'invoice_date' => $this->invoice_date?->toDateString(),
 
+            'invoice_type' => $this->invoice_type->value,
+            'invoice_type_label' => $this->invoice_type->label(),
+            // Snapshotted at creation, so a historical invoice reports the
+            // pricing mode it was actually raised under.
+            'prices_include_tax' => (bool) $this->prices_include_tax,
+
             'tax_type' => $this->tax_type->value,
             'tax_type_label' => $this->tax_type->label(),
             'status' => $this->status->value,
@@ -61,6 +67,37 @@ class InvoiceResource extends JsonResource
             'customer_id' => $this->customer_id,
 
             'items' => InvoiceItemResource::collection($this->whenLoaded('items')),
+            'charges' => InvoiceChargeResource::collection($this->whenLoaded('charges')),
+
+            /*
+             * Consignee and transport. Always present for a uniform payload
+             * shape; only a dealer invoice fills them in, and the document
+             * prints the block only when something is there.
+             */
+            'consignee_name' => $this->consignee_name,
+            'consignee_address' => $this->consignee_address,
+            'consignee_gstin' => $this->consignee_gstin,
+            'consignee_state_code' => $this->consignee_state_code,
+
+            'eway_bill_no' => $this->eway_bill_no,
+            'vehicle_no' => $this->vehicle_no,
+            'dispatched_through' => $this->dispatched_through,
+            'destination' => $this->destination,
+            'lr_rr_no' => $this->lr_rr_no,
+            'lr_rr_date' => $this->lr_rr_date?->toDateString(),
+            'delivery_note' => $this->delivery_note,
+            'delivery_note_date' => $this->delivery_note_date?->toDateString(),
+            'dispatch_doc_no' => $this->dispatch_doc_no,
+            'buyer_order_no' => $this->buyer_order_no,
+            'buyer_order_date' => $this->buyer_order_date?->toDateString(),
+            'terms_of_delivery' => $this->terms_of_delivery,
+            'mode_of_payment' => $this->mode_of_payment,
+            'other_references' => $this->other_references,
+
+            // Typed in from the government portal; never generated here.
+            'irn' => $this->irn,
+            'ack_no' => $this->ack_no,
+            'ack_date' => $this->ack_date?->toDateString(),
 
             'cancellation_reason' => $this->cancellation_reason,
             'finalized_at' => $this->finalized_at?->toIso8601String(),

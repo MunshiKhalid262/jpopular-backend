@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Sales;
 
+use App\Domain\Sales\Data\InvoiceChargeInput;
 use App\Domain\Sales\Data\InvoiceLineInput;
+use App\Enums\InvoiceType;
 use App\Enums\TaxType;
 use App\Http\Requests\Catalog\StoreProductRequest;
 use App\Models\Invoice;
@@ -32,7 +34,56 @@ class StoreInvoiceRequest extends FormRequest
 
             'tax_type' => ['required', 'string', Rule::in(TaxType::values())],
 
+            // Decides the DOCUMENT, not the tax: a dealer invoice carries the
+            // transport block and e-Way Bill page, a customer bill does not.
+            'invoice_type' => ['sometimes', 'string', Rule::in(InvoiceType::values())],
+
             'invoice_date' => ['required', 'date'],
+
+            // Consignee. Dealer invoices may ship somewhere other than the
+            // billing party.
+            'consignee_name' => ['sometimes', 'nullable', 'string', 'max:160'],
+            'consignee_address' => ['sometimes', 'nullable', 'string', 'max:300'],
+            'consignee_gstin' => ['sometimes', 'nullable', 'string', 'size:15'],
+            'consignee_state_code' => ['sometimes', 'nullable', 'string', 'regex:/^[0-9]{2}$/'],
+
+            // Transport and dispatch.
+            'eway_bill_no' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'vehicle_no' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'dispatched_through' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'destination' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'lr_rr_no' => ['sometimes', 'nullable', 'string', 'max:60'],
+            'lr_rr_date' => ['sometimes', 'nullable', 'date'],
+            'delivery_note' => ['sometimes', 'nullable', 'string', 'max:60'],
+            'delivery_note_date' => ['sometimes', 'nullable', 'date'],
+            'dispatch_doc_no' => ['sometimes', 'nullable', 'string', 'max:60'],
+            'buyer_order_no' => ['sometimes', 'nullable', 'string', 'max:60'],
+            'buyer_order_date' => ['sometimes', 'nullable', 'date'],
+            'terms_of_delivery' => ['sometimes', 'nullable', 'string', 'max:200'],
+            'mode_of_payment' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'other_references' => ['sometimes', 'nullable', 'string', 'max:200'],
+
+            /*
+             * e-Invoice fields, typed in from the government portal. There is
+             * no IRP integration, so these are accepted as given and never
+             * generated here.
+             */
+            'irn' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'ack_no' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'ack_date' => ['sometimes', 'nullable', 'date'],
+
+            // Optional extra charges, each taxed at its own rate.
+            'charges' => ['sometimes', 'array', 'max:20'],
+            'charges.*.description' => ['required', 'string', 'max:200'],
+            'charges.*.amount' => [
+                'required',
+                'regex:'.StoreProductRequest::MONEY_REGEX, 'numeric', 'gt:0',
+            ],
+            'charges.*.gst_rate' => [
+                'sometimes', 'nullable',
+                'regex:'.StoreProductRequest::RATE_REGEX, 'numeric', 'between:0,100',
+            ],
+            'charges.*.hsn_code' => ['sometimes', 'nullable', 'string', 'max:8', 'regex:/^[0-9]{4,8}$/'],
 
             'notes' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'terms' => ['sometimes', 'nullable', 'string', 'max:2000'],
@@ -123,10 +174,43 @@ class StoreInvoiceRequest extends FormRequest
     }
 
     /**
+     * The validated extra charges as domain inputs.
+     *
+     * @return list<InvoiceChargeInput>
+     */
+    public function chargeInputs(): array
+    {
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $this->validated('charges', []);
+
+        $charges = [];
+
+        foreach (array_values($rows) as $index => $row) {
+            $charges[] = new InvoiceChargeInput(
+                description: (string) $row['description'],
+                amount: (string) $row['amount'],
+                gstRate: isset($row['gst_rate']) && $row['gst_rate'] !== null ? (string) $row['gst_rate'] : '0',
+                hsnCode: $row['hsn_code'] ?? null,
+                sortOrder: $index,
+            );
+        }
+
+        return $charges;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function invoiceAttributes(): array
     {
-        return $this->safe()->only(['customer_id', 'tax_type', 'invoice_date', 'notes', 'terms']);
+        return $this->safe()->only([
+            'customer_id', 'invoice_type', 'tax_type', 'invoice_date', 'notes', 'terms',
+            'consignee_name', 'consignee_address', 'consignee_gstin', 'consignee_state_code',
+            'eway_bill_no', 'vehicle_no', 'dispatched_through', 'destination',
+            'lr_rr_no', 'lr_rr_date', 'delivery_note', 'delivery_note_date',
+            'dispatch_doc_no', 'buyer_order_no', 'buyer_order_date',
+            'terms_of_delivery', 'mode_of_payment', 'other_references',
+            'irn', 'ack_no', 'ack_date',
+        ]);
     }
 }

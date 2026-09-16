@@ -61,8 +61,10 @@ class BusinessSettingsController extends Controller
              * limit. InvoiceNumberGenerator refuses an over-long prefix at
              * allocation time; catching it here gives a field error instead.
              */
-            'invoice_prefix' => ['sometimes', 'string', 'max:4', 'regex:/^[A-Za-z0-9]+$/'],
+            'invoice_prefix' => ['sometimes', 'string', 'max:2', 'regex:/^[A-Za-z0-9]+$/'],
+            'dealer_invoice_prefix' => ['sometimes', 'string', 'max:2', 'regex:/^[A-Za-z0-9]+$/'],
             'invoice_terms' => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'invoice_declaration' => ['sometimes', 'nullable', 'string', 'max:500'],
 
             'bank_name' => ['sometimes', 'nullable', 'string', 'max:120'],
             'bank_account_name' => ['sometimes', 'nullable', 'string', 'max:160'],
@@ -73,11 +75,24 @@ class BusinessSettingsController extends Controller
 
             'default_gst_rate' => ['sometimes', 'numeric', 'between:0,100'],
             'enable_round_off' => ['sometimes', 'boolean'],
+            /*
+             * The DEFAULT for new invoices only. Each invoice snapshots the
+             * value it was raised under, so flipping this never re-interprets
+             * the arithmetic of an invoice already issued.
+             */
+            'prices_include_tax' => ['sometimes', 'boolean'],
             'financial_year_start_month' => ['sometimes', 'integer', 'between:1,12'],
         ], [
             'state_code.regex' => 'The state code must be the two-digit GST code, e.g. 32 for Kerala.',
             'invoice_prefix.regex' => 'The invoice prefix may contain letters and digits only.',
-            'invoice_prefix.max' => 'Keep the prefix to 4 characters so invoice numbers stay within the GST 16-character limit.',
+            /*
+             * Two characters, not four. The number format is
+             * {prefix}/{2026-27}/{00001}, and GST allows 16 characters in
+             * total, so a 3-character prefix produces 17 and the generator
+             * refuses it at allocation time -- far too late to be useful.
+             */
+            'invoice_prefix.max' => 'Keep the prefix to 2 characters: numbers look like JP/2026-27/00001 and GST allows only 16 characters.',
+            'dealer_invoice_prefix.max' => 'Keep the dealer prefix to 2 characters, for the same 16-character GST limit.',
         ]);
 
         $settings = BusinessSettings::current();
@@ -111,7 +126,9 @@ class BusinessSettingsController extends Controller
             'website' => $settings->website,
 
             'invoice_prefix' => $settings->invoice_prefix,
+            'dealer_invoice_prefix' => $settings->dealer_invoice_prefix,
             'invoice_terms' => $settings->invoice_terms,
+            'invoice_declaration' => $settings->invoice_declaration,
 
             'bank_name' => $settings->bank_name,
             'bank_account_name' => $settings->bank_account_name,
@@ -122,6 +139,7 @@ class BusinessSettingsController extends Controller
 
             'default_gst_rate' => $settings->default_gst_rate,
             'enable_round_off' => $settings->enable_round_off,
+            'prices_include_tax' => (bool) $settings->prices_include_tax,
             'financial_year_start_month' => $settings->financial_year_start_month,
 
             // Drives the "you cannot raise a GST invoice yet" warning.

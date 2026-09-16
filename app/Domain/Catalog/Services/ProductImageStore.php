@@ -84,6 +84,38 @@ final class ProductImageStore
     }
 
     /**
+     * Removes EVERY stored product image.
+     *
+     * Lives here rather than in the caller because this class is the only one
+     * permitted to write these files, so it is the only one that should be
+     * deleting them wholesale -- and it is the only place that knows the
+     * managed directory, which stays private.
+     *
+     * Scoped to that directory alone, so it cannot reach the rest of the
+     * public disk however it is invoked.
+     *
+     * @return int the number of files removed
+     */
+    public function purgeAll(): int
+    {
+        $disk = Storage::disk(self::DISK);
+
+        if (! $disk->exists(self::DIRECTORY)) {
+            return 0;
+        }
+
+        $files = $disk->files(self::DIRECTORY);
+
+        foreach ($files as $file) {
+            $disk->delete($file);
+        }
+
+        // The directory itself stays: store() writes into it again the moment
+        // the next image is uploaded.
+        return count($files);
+    }
+
+    /**
      * Public URL for a stored path, or null when there is no image.
      */
     public function url(?string $path): ?string

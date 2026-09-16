@@ -47,7 +47,7 @@ final class FinalizeInvoice
     /**
      * @param  list<InvoiceLineInput>  $lines  the draft's lines, re-read at finalize time
      */
-    public function handle(Invoice $invoice, array $lines, User $actor, string $invoiceDiscount = '0'): Invoice
+    public function handle(Invoice $invoice, array $lines, User $actor, string $invoiceDiscount = '0', array $charges = []): Invoice
     {
         if ($invoice->isFinalized()) {
             throw InvoiceStateException::alreadyFinalized();
@@ -61,7 +61,7 @@ final class FinalizeInvoice
             throw InvoiceStateException::noLines();
         }
 
-        return DB::transaction(function () use ($invoice, $lines, $actor, $invoiceDiscount): Invoice {
+        return DB::transaction(function () use ($invoice, $lines, $actor, $invoiceDiscount, $charges): Invoice {
             // 1. Deterministic lock order prevents deadlock between two
             //    invoices touching the same products in opposite orders.
             $this->ledger->lockProducts(
@@ -70,11 +70,12 @@ final class FinalizeInvoice
 
             // 2. Snapshot: from here the invoice no longer depends on the
             //    live product rows.
-            $this->composer->apply($invoice, $lines, $invoiceDiscount);
+            $this->composer->apply($invoice, $lines, $invoiceDiscount, $charges);
 
             // 3. Serialised by a row lock on the sequence, never MAX+1.
             $invoice->forceFill([
-                'invoice_number' => $this->numbers->next($invoice->invoice_date),
+                // Dealer and customer invoices draw from separate series.
+                'invoice_number' => $this->numbers->next($invoice->invoice_date, $invoice->invoice_type),
                 'financial_year' => $this->numbers->financialYear($invoice->invoice_date),
             ])->save();
 

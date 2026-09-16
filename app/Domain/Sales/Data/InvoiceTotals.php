@@ -17,11 +17,13 @@ final readonly class InvoiceTotals
 {
     /**
      * @param  list<InvoiceLineTotals>  $lines
+     * @param  list<InvoiceChargeTotals>  $charges
      */
     public function __construct(
         public TaxType $taxType,
         public ?SupplyType $supplyType,
         public array $lines,
+        public array $charges,
         public string $subtotal,
         public string $discountAmount,
         public string $taxableAmount,

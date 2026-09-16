@@ -8,6 +8,7 @@ use App\Enums\SupplyType;
 use App\Enums\TaxType;
 use App\Models\BusinessSettings;
 use App\Models\Invoice;
+use App\Models\InvoiceCharge;
 use App\Models\InvoiceItem;
 use Illuminate\Support\Collection;
 
@@ -37,9 +38,53 @@ final class InvoiceDocument
     {
         // Only the snapshot rows and the customer are needed. `items.product`
         // is pointedly absent.
-        $invoice->loadMissing(['items', 'customer']);
+        $invoice->loadMissing(['items', 'charges', 'customer']);
 
         return new self($invoice, BusinessSettings::current());
+    }
+
+    public function isDealer(): bool
+    {
+        return $this->invoice->isDealerInvoice();
+    }
+
+    /** @return Collection<int, InvoiceCharge> */
+    public function charges(): Collection
+    {
+        return $this->invoice->charges;
+    }
+
+    /** Total quantity across all lines, as the sample's "8 NOS" total. */
+    public function totalQuantity(): string
+    {
+        $total = '0';
+
+        foreach ($this->lines() as $item) {
+            $total = bcadd($total, (string) $item->quantity, 3);
+        }
+
+        return $total;
+    }
+
+    /** The unit shown beside the quantity total, when every line shares one. */
+    public function commonUnit(): ?string
+    {
+        $units = $this->lines()->pluck('unit')->unique();
+
+        return $units->count() === 1 ? (string) $units->first() : null;
+    }
+
+    /**
+     * Whether any line was priced inclusive of tax, which decides if the
+     * "Rate (Incl. of Tax)" column is worth printing at all.
+     */
+    public function showsInclusiveRate(): bool
+    {
+        return $this->chargesGst()
+            && (bool) $this->invoice->prices_include_tax
+            && $this->lines()->contains(
+                fn ($item): bool => bccomp((string) $item->unit_price_gross, (string) $item->unit_price, 2) !== 0
+            );
     }
 
     public function chargesGst(): bool
@@ -94,25 +139,80 @@ final class InvoiceDocument
 
         $groups = [];
 
-        foreach ($this->lines() as $item) {
-            $key = (string) $item->gst_rate;
+        /*
+         * Grouped by HSN/SAC, as a GST summary is read: the sample shows
+         * 87116020 for the scooters and 997135 for the insurance service on
+         * separate rows, each at its own rate. Charges are folded in for
+         * exactly that reason.
+         */
+        $add = function (?string $hsn, string $rate, array $amounts) use (&$groups): void {
+            $key = ($hsn ?? '-').'|'.$rate;
 
             $groups[$key] ??= [
-                'rate' => (string) $item->gst_rate,
+                'hsn_code' => $hsn,
+                'rate' => $rate,
                 'taxable' => '0.00',
+                'cgst_rate' => $amounts['cgst_rate'],
                 'cgst' => '0.00',
+                'sgst_rate' => $amounts['sgst_rate'],
                 'sgst' => '0.00',
+                'igst_rate' => $amounts['igst_rate'],
                 'igst' => '0.00',
+                'tax' => '0.00',
             ];
 
-            foreach (['taxable' => 'taxable_amount', 'cgst' => 'cgst_amount', 'sgst' => 'sgst_amount', 'igst' => 'igst_amount'] as $target => $column) {
-                $groups[$key][$target] = bcadd($groups[$key][$target], (string) $item->{$column}, 2);
+            foreach (['taxable', 'cgst', 'sgst', 'igst', 'tax'] as $field) {
+                $groups[$key][$field] = bcadd($groups[$key][$field], $amounts[$field], 2);
+            }
+        };
+
+        foreach ($this->lines() as $item) {
+            $add((string) $item->hsn_code ?: null, (string) $item->gst_rate, [
+                'taxable' => (string) $item->taxable_amount,
+                'cgst_rate' => (string) $item->cgst_rate,
+                'cgst' => (string) $item->cgst_amount,
+                'sgst_rate' => (string) $item->sgst_rate,
+                'sgst' => (string) $item->sgst_amount,
+                'igst_rate' => (string) $item->igst_rate,
+                'igst' => (string) $item->igst_amount,
+                'tax' => (string) $item->tax_amount,
+            ]);
+        }
+
+        foreach ($this->charges() as $charge) {
+            $add((string) $charge->hsn_code ?: null, (string) $charge->gst_rate, [
+                'taxable' => (string) $charge->taxable_amount,
+                'cgst_rate' => (string) $charge->cgst_rate,
+                'cgst' => (string) $charge->cgst_amount,
+                'sgst_rate' => (string) $charge->sgst_rate,
+                'sgst' => (string) $charge->sgst_amount,
+                'igst_rate' => (string) $charge->igst_rate,
+                'igst' => (string) $charge->igst_amount,
+                'tax' => (string) $charge->tax_amount,
+            ]);
+        }
+
+        ksort($groups);
+
+        return array_values($groups);
+    }
+
+    /**
+     * Column totals for the foot of the HSN summary.
+     *
+     * @return array<string, string>
+     */
+    public function taxSummaryTotals(): array
+    {
+        $totals = ['taxable' => '0.00', 'cgst' => '0.00', 'sgst' => '0.00', 'igst' => '0.00', 'tax' => '0.00'];
+
+        foreach ($this->taxSummary() as $row) {
+            foreach ($totals as $field => $value) {
+                $totals[$field] = bcadd($value, $row[$field], 2);
             }
         }
 
-        ksort($groups, SORT_NUMERIC);
-
-        return array_values($groups);
+        return $totals;
     }
 
     /** Outstanding balance. Zero payments simply means the whole total is due. */

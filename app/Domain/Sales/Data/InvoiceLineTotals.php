@@ -21,6 +21,8 @@ final readonly class InvoiceLineTotals
         public string $unit,
         public string $quantity,
         public string $unitPrice,
+        /** The price as entered; equals unitPrice under tax-exclusive pricing. */
+        public string $unitPriceGross,
         /** The product's configured rate. Informational on a non-GST bill. */
         public string $gstRate,
         public string $lineSubtotal,

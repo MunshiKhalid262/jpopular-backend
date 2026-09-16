@@ -8,6 +8,7 @@ use App\Domain\Sales\Data\InvoiceLineInput;
 use App\Domain\Sales\Exceptions\InvoiceStateException;
 use App\Domain\Sales\Services\InvoiceComposer;
 use App\Enums\InvoiceStatus;
+use App\Models\BusinessSettings;
 use App\Models\Invoice;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -27,19 +28,29 @@ final class ManageInvoice
      * @param  array<string, mixed>  $attributes
      * @param  list<InvoiceLineInput>  $lines
      */
-    public function create(array $attributes, array $lines, User $actor, string $invoiceDiscount = '0'): Invoice
+    public function create(array $attributes, array $lines, User $actor, string $invoiceDiscount = '0', array $charges = []): Invoice
     {
-        return DB::transaction(function () use ($attributes, $lines, $actor, $invoiceDiscount): Invoice {
+        return DB::transaction(function () use ($attributes, $lines, $actor, $invoiceDiscount, $charges): Invoice {
             $invoice = new Invoice;
             $invoice->fill($attributes);
             $invoice->status = InvoiceStatus::Draft;
             $invoice->created_by = $actor->getKey();
+
+            /*
+             * Snapshot the pricing mode at creation rather than reading it at
+             * print time. Switching the shop to MRP-inclusive pricing next
+             * month must not silently re-interpret the figures on an invoice
+             * raised today, and a draft must finalize under the rules it was
+             * started with.
+             */
+            $invoice->prices_include_tax = (bool) BusinessSettings::current()->prices_include_tax;
+
             $invoice->save();
 
             // Totals come from the same engine that will freeze them at
             // finalization, so the draft shows the figure that will be issued.
             if ($lines !== []) {
-                $this->composer->apply($invoice->refresh(), $lines, $invoiceDiscount);
+                $this->composer->apply($invoice->refresh(), $lines, $invoiceDiscount, $charges);
             }
 
             return $invoice->refresh();
@@ -50,14 +61,14 @@ final class ManageInvoice
      * @param  array<string, mixed>  $attributes
      * @param  list<InvoiceLineInput>  $lines
      */
-    public function update(Invoice $invoice, array $attributes, array $lines, string $invoiceDiscount = '0'): Invoice
+    public function update(Invoice $invoice, array $attributes, array $lines, string $invoiceDiscount = '0', array $charges = []): Invoice
     {
         $this->assertDraft($invoice);
 
-        return DB::transaction(function () use ($invoice, $attributes, $lines, $invoiceDiscount): Invoice {
+        return DB::transaction(function () use ($invoice, $attributes, $lines, $invoiceDiscount, $charges): Invoice {
             $invoice->fill($attributes)->save();
 
-            $this->composer->apply($invoice->refresh(), $lines, $invoiceDiscount);
+            $this->composer->apply($invoice->refresh(), $lines, $invoiceDiscount, $charges);
 
             return $invoice->refresh();
         });
@@ -75,6 +86,7 @@ final class ManageInvoice
 
         DB::transaction(function () use ($invoice): void {
             $invoice->items()->delete();
+            $invoice->charges()->delete();
             $invoice->delete();
         });
     }

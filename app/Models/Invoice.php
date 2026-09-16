@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\InvoiceStatus;
+use App\Enums\InvoiceType;
 use App\Enums\PaymentStatus;
 use App\Enums\SupplyType;
 use App\Enums\TaxType;
@@ -43,10 +44,36 @@ class Invoice extends Model
      */
     protected $fillable = [
         'customer_id',
+        'invoice_type',
         'tax_type',
         'invoice_date',
         'notes',
         'terms',
+
+        // Consignee and transport: operator-entered document detail, not
+        // money. prices_include_tax is absent deliberately -- it is snapshotted
+        // by the Action from settings, never chosen per request.
+        'consignee_name',
+        'consignee_address',
+        'consignee_gstin',
+        'consignee_state_code',
+        'eway_bill_no',
+        'vehicle_no',
+        'dispatched_through',
+        'destination',
+        'lr_rr_no',
+        'lr_rr_date',
+        'delivery_note',
+        'delivery_note_date',
+        'dispatch_doc_no',
+        'buyer_order_no',
+        'buyer_order_date',
+        'terms_of_delivery',
+        'mode_of_payment',
+        'other_references',
+        'irn',
+        'ack_no',
+        'ack_date',
     ];
 
     /**
@@ -55,6 +82,12 @@ class Invoice extends Model
     protected function casts(): array
     {
         return [
+            'invoice_type' => InvoiceType::class,
+            'prices_include_tax' => 'boolean',
+            'lr_rr_date' => 'date',
+            'delivery_note_date' => 'date',
+            'buyer_order_date' => 'date',
+            'ack_date' => 'date',
             'tax_type' => TaxType::class,
             'status' => InvoiceStatus::class,
             'payment_status' => PaymentStatus::class,
@@ -82,6 +115,14 @@ class Invoice extends Model
     public function items(): HasMany
     {
         return $this->hasMany(InvoiceItem::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    /**
+     * @return HasMany<InvoiceCharge, $this>
+     */
+    public function charges(): HasMany
+    {
+        return $this->hasMany(InvoiceCharge::class)->orderBy('sort_order')->orderBy('id');
     }
 
     /**
@@ -134,6 +175,37 @@ class Invoice extends Model
     public function chargesGst(): bool
     {
         return $this->tax_type === TaxType::Gst;
+    }
+
+    public function isDealerInvoice(): bool
+    {
+        return $this->invoice_type === InvoiceType::Dealer;
+    }
+
+    /**
+     * Whether the transport/dispatch block has anything to show.
+     *
+     * A dealer invoice with no transport details entered yet should not print
+     * a grid of empty boxes.
+     */
+    public function hasTransportDetails(): bool
+    {
+        foreach ([
+            'eway_bill_no', 'vehicle_no', 'dispatched_through', 'destination',
+            'lr_rr_no', 'delivery_note', 'dispatch_doc_no', 'buyer_order_no',
+            'terms_of_delivery', 'mode_of_payment', 'other_references',
+        ] as $field) {
+            if (filled($this->{$field})) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function hasEInvoiceDetails(): bool
+    {
+        return filled($this->irn) || filled($this->ack_no);
     }
 
     /**

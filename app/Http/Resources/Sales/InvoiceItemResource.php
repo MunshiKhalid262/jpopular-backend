@@ -34,7 +34,11 @@ class InvoiceItemResource extends JsonResource
             'unit' => $this->unit,
 
             'quantity' => $this->quantity,
+            // The taxable rate every total is built from.
             'unit_price' => $this->unit_price,
+            // The price as entered; differs from unit_price only under
+            // tax-inclusive pricing, where it is the customer-facing MRP.
+            'unit_price_gross' => $this->unit_price_gross,
             'gst_rate' => $this->gst_rate,
 
             'line_subtotal' => $this->line_subtotal,

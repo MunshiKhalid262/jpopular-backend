@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Sales\Services;
 
+use App\Enums\InvoiceType;
 use App\Models\BusinessSettings;
 use App\Models\DocumentSequence;
 use DateTimeInterface;
@@ -47,23 +48,36 @@ final class InvoiceNumberGenerator
      * until the invoice itself is committed, or two finalizations could reuse
      * the same number.
      */
-    public function next(DateTimeInterface|string|null $invoiceDate = null): string
-    {
+    public function next(
+        DateTimeInterface|string|null $invoiceDate = null,
+        InvoiceType $invoiceType = InvoiceType::Customer,
+    ): string {
         $settings = BusinessSettings::current();
-        $prefix = trim((string) $settings->invoice_prefix) ?: 'JP';
+
+        /*
+         * Dealer and customer invoices run in SEPARATE series, each with its
+         * own prefix and its own counter row, so the two document streams can
+         * be reconciled independently and neither leaves gaps in the other.
+         */
+        $prefix = $invoiceType === InvoiceType::Dealer
+            ? (trim((string) $settings->dealer_invoice_prefix) ?: 'JD')
+            : (trim((string) $settings->invoice_prefix) ?: 'JP');
+
+        $sequenceType = $invoiceType->sequenceKey();
+
         $date = $invoiceDate === null ? Carbon::now() : Carbon::parse($invoiceDate);
 
         $financialYear = $this->financialYear($date, (int) $settings->financial_year_start_month);
 
         // firstOrCreate then lock: a brand-new series has no row to lock yet.
         DocumentSequence::query()->firstOrCreate(
-            ['type' => self::TYPE, 'prefix' => $prefix, 'financial_year' => $financialYear],
+            ['type' => $sequenceType, 'prefix' => $prefix, 'financial_year' => $financialYear],
             ['last_number' => 0],
         );
 
         /** @var DocumentSequence $sequence */
         $sequence = DocumentSequence::query()
-            ->where('type', self::TYPE)
+            ->where('type', $sequenceType)
             ->where('prefix', $prefix)
             ->where('financial_year', $financialYear)
             ->lockForUpdate()
