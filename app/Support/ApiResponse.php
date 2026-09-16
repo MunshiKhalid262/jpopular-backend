@@ -46,12 +46,16 @@ final class ApiResponse
 
     /**
      * @param  array<string, list<string>>  $errors
+     * @param  array<string, mixed>  $extra  merged into the envelope; used for the
+     *                                       server-error reference and, when
+     *                                       enabled, the exception detail
      */
     public static function error(
         string $message,
         int $status = 400,
         array $errors = [],
         ?string $code = null,
+        array $extra = [],
     ): JsonResponse {
         $payload = [
             'success' => false,
@@ -64,6 +68,13 @@ final class ApiResponse
 
         if ($code !== null) {
             $payload['code'] = $code;
+        }
+
+        // Never allowed to overwrite the envelope's own keys.
+        foreach ($extra as $key => $value) {
+            if (! array_key_exists($key, $payload)) {
+                $payload[$key] = $value;
+            }
         }
 
         return response()->json($payload, $status);

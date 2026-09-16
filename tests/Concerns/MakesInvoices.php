@@ -13,6 +13,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Product;
 use App\Models\User;
+use App\Support\BusinessPeriod;
 
 /**
  * Builds real invoices for tests.
@@ -80,13 +81,27 @@ trait MakesInvoices
             attributes: [
                 'customer_id' => $customer?->getKey(),
                 'tax_type' => $options['tax_type'] ?? TaxType::Gst,
-                'invoice_date' => $options['date'] ?? now()->toDateString(),
+                'invoice_date' => $options['date'] ?? self::businessToday(),
             ],
             lines: $lines,
             actor: $actor,
         );
 
         return app(FinalizeInvoice::class)->handle($draft, $lines, $actor);
+    }
+
+    /**
+     * Today, as the BUSINESS sees it.
+     *
+     * Not now()->toDateString(), which is UTC. The two disagree for five and a
+     * half hours of every day: at 00:15 IST it is still the previous date in
+     * UTC, so a fixture dated that way lands outside the report's idea of
+     * "today" and the test fails at night for no reason a reader could guess.
+     * Production is unaffected -- an operator picks the date in business time.
+     */
+    protected static function businessToday(): string
+    {
+        return BusinessPeriod::now()->toDateString();
     }
 
     /** A draft, for asserting that drafts never count as sales. */
@@ -105,7 +120,7 @@ trait MakesInvoices
             attributes: [
                 'customer_id' => (Customer::factory()->create())->getKey(),
                 'tax_type' => $options['tax_type'] ?? TaxType::Gst,
-                'invoice_date' => $options['date'] ?? now()->toDateString(),
+                'invoice_date' => $options['date'] ?? self::businessToday(),
             ],
             lines: $lines,
             actor: $actor,

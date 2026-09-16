@@ -88,6 +88,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Expose Server Errors
+    |--------------------------------------------------------------------------
+    |
+    | When true, a 500 response carries the exception class, message and
+    | location alongside its reference, so the cause is visible in the network
+    | tab without shelling into the server to read the log.
+    |
+    | This is NOT APP_DEBUG. Debug mode returns Laravel's full HTML error page
+    | with a stack trace, request payload and environment, and must stay off in
+    | production. This adds one small JSON object and never includes the trace.
+    |
+    | Off by default: an exception message can carry SQL, filesystem paths and
+    | internal class names that a public API should not volunteer. Reasonable
+    | to enable on a small internal system whose only users are its owners.
+    |
+    */
+
+    'expose_server_errors' => env('EXPOSE_SERVER_ERRORS', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
     |

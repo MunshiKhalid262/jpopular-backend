@@ -4,6 +4,7 @@ use App\Exceptions\BusinessRuleException;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\ForceJsonResponse;
 use App\Support\ApiResponse;
+use App\Support\ErrorReference;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -11,6 +12,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -35,6 +37,47 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        /*
+         * REPORTING MUST NEVER BREAK THE RESPONSE.
+         *
+         * Laravel reports an exception before rendering it. If the log write
+         * fails -- an unwritable file, a full disk -- that failure propagates
+         * and replaces whatever the API was about to return with a bare 500
+         * and an empty body. That is exactly how a perfectly handled
+         * "insufficient stock" 409 once reached the browser as an unexplained
+         * 500: storage/logs was root-owned and php-fpm runs as www-data.
+         *
+         * Logging is therefore wrapped here, and returning false stops
+         * Laravel's own reporting from running a second, unguarded time.
+         */
+        $exceptions->report(function (Throwable $e): bool {
+            $reference = ErrorReference::current();
+
+            try {
+                Log::error($e->getMessage(), [
+                    'reference' => $reference,
+                    'exception' => $e,
+                ]);
+            } catch (Throwable $loggingFailure) {
+                /*
+                 * The log is unavailable. error_log() goes to the php-fpm
+                 * error log, which is a different file with different
+                 * permissions, so there is still somewhere to look -- and the
+                 * request carries on returning a proper response either way.
+                 */
+                error_log(sprintf(
+                    '[jpopular %s] logging failed (%s) while reporting: %s in %s:%d',
+                    $reference,
+                    $loggingFailure->getMessage(),
+                    $e->getMessage(),
+                    $e->getFile(),
+                    $e->getLine(),
+                ));
+            }
+
+            return false;
+        });
+
         // Every API error leaves through the same envelope. See ARCHITECTURE-V1.md 9.1.
         $exceptions->render(function (BusinessRuleException $e, Request $request) {
             return $request->expectsJson() ? $e->render() : null;
@@ -125,12 +168,43 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null; // let Laravel's debug renderer help in local dev
             }
 
-            report($e);
+            /*
+             * Reporting already happened in the guarded callback above, so
+             * report() is deliberately NOT called again here.
+             *
+             * The reference is the same one written to the log, so an operator
+             * can quote it and the exact stack trace is one grep away:
+             *   grep A1B2C3D4 storage/logs/laravel.log
+             */
+            $reference = ErrorReference::current();
+
+            /*
+             * `expose_server_errors` adds the real exception to the response.
+             * Off by default, because the message can carry SQL, filesystem
+             * paths and internal class names that a public API should not
+             * volunteer. Worth turning on for a small internal system whose
+             * only users are its owners.
+             *
+             * The stack trace is never included even when this is on -- the
+             * class, message and location identify the fault, and the trace
+             * belongs in the log.
+             */
+            $extra = ['reference' => $reference];
+
+            if (config('app.expose_server_errors')) {
+                $extra['debug'] = [
+                    'exception' => $e::class,
+                    'message' => $e->getMessage(),
+                    'file' => str_replace(base_path().'/', '', $e->getFile()),
+                    'line' => $e->getLine(),
+                ];
+            }
 
             return ApiResponse::error(
                 message: 'An unexpected error occurred.',
                 status: Response::HTTP_INTERNAL_SERVER_ERROR,
                 code: 'SERVER_ERROR',
+                extra: $extra,
             );
         });
     })->create();
