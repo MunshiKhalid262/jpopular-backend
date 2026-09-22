@@ -20,6 +20,8 @@ class CustomerResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'type' => $this->type->value,
+            'type_label' => $this->type->label(),
             'name' => $this->name,
             'phone' => $this->phone,
             'email' => $this->email,
@@ -37,6 +39,20 @@ class CustomerResource extends JsonResource
             // Lets the invoice form warn BEFORE the operator builds a GST
             // invoice that cannot be finalized for want of a state code.
             'can_be_billed_with_gst' => $this->canBeBilledWithGst(),
+
+            /*
+             * Dealer dispatch defaults. The invoice form copies these in when
+             * the dealer is chosen, and they stay editable on that invoice --
+             * changing them there never writes back here.
+             */
+            'default_consignee_name' => $this->default_consignee_name,
+            'default_consignee_address' => $this->default_consignee_address,
+            'default_consignee_gstin' => $this->default_consignee_gstin,
+            'default_consignee_state_code' => $this->default_consignee_state_code,
+            'default_dispatched_through' => $this->default_dispatched_through,
+            'default_destination' => $this->default_destination,
+            'default_terms_of_delivery' => $this->default_terms_of_delivery,
+            'default_mode_of_payment' => $this->default_mode_of_payment,
 
             'archived_at' => $this->deleted_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),

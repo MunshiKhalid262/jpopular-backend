@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1\Sales;
 
+use App\Enums\CustomerType;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Sales\CustomerResource;
 use App\Models\Customer;
@@ -38,6 +39,12 @@ class CustomerController extends Controller
             ->when(
                 $request->filled('is_active'),
                 fn ($query) => $query->where('is_active', $request->boolean('is_active'))
+            )
+            // The dealer picker on an invoice and the /dealers page both use
+            // this; without it the invoice form would offer every walk-in.
+            ->when(
+                $request->filled('type') && in_array($request->string('type')->toString(), CustomerType::values(), true),
+                fn ($query) => $query->where('type', $request->string('type')->toString())
             )
             ->orderBy('name')
             ->paginate(perPage: min($request->integer('per_page', 25), self::MAX_PER_PAGE))
@@ -88,6 +95,7 @@ class CustomerController extends Controller
     private function validated(Request $request): array
     {
         return $request->validate([
+            'type' => ['sometimes', 'string', Rule::in(CustomerType::values())],
             'name' => ['required', 'string', 'max:160'],
             'phone' => ['sometimes', 'nullable', 'string', 'max:20'],
             'email' => ['sometimes', 'nullable', 'email', 'max:160'],
@@ -104,9 +112,25 @@ class CustomerController extends Controller
             'gstin' => ['sometimes', 'nullable', 'string', 'size:15', Rule::unique('customers', 'gstin')->ignore($request->route('customer'))->whereNull('deleted_at')],
             'notes' => ['sometimes', 'nullable', 'string', 'max:1000'],
             'is_active' => ['sometimes', 'boolean'],
+
+            /*
+             * Dealer dispatch defaults. Accepted on any customer -- the type
+             * decides whether the UI offers them, and storing a stray default
+             * on a walk-in harms nothing.
+             */
+            'default_consignee_name' => ['sometimes', 'nullable', 'string', 'max:160'],
+            'default_consignee_address' => ['sometimes', 'nullable', 'string', 'max:300'],
+            'default_consignee_gstin' => ['sometimes', 'nullable', 'string', 'size:15'],
+            'default_consignee_state_code' => ['sometimes', 'nullable', 'string', 'regex:/^[0-9]{2}$/'],
+            'default_dispatched_through' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'default_destination' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'default_terms_of_delivery' => ['sometimes', 'nullable', 'string', 'max:200'],
+            'default_mode_of_payment' => ['sometimes', 'nullable', 'string', 'max:120'],
         ], [
-            'state_code.regex' => 'The state code must be the two-digit GST code, e.g. 32 for Kerala.',
+            'state_code.regex' => 'The state code must be the two-digit GST code, e.g. 19 for West Bengal.',
             'gstin.size' => 'A GSTIN is exactly 15 characters.',
+            'default_consignee_state_code.regex' => 'The consignee state code must be the two-digit GST code.',
+            'default_consignee_gstin.size' => 'A GSTIN is exactly 15 characters.',
         ]);
     }
 }

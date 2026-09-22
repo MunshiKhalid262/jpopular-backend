@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\CustomerType;
 use Database\Factories\CustomerFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -25,9 +26,23 @@ class Customer extends Model
     use HasFactory, SoftDeletes;
 
     /**
+     * A new customer is a walk-in until told otherwise.
+     *
+     * Declared here as well as on the column: a freshly created model does not
+     * read the database default back, so without this `type` is null in memory
+     * and anything casting it -- the API resource, for one -- falls over.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'type' => CustomerType::Customer->value,
+    ];
+
+    /**
      * @var list<string>
      */
     protected $fillable = [
+        'type',
         'name',
         'phone',
         'email',
@@ -39,6 +54,17 @@ class Customer extends Model
         'gstin',
         'notes',
         'is_active',
+
+        // Dealer dispatch defaults, copied onto an invoice when the dealer is
+        // chosen and editable there afterwards.
+        'default_consignee_name',
+        'default_consignee_address',
+        'default_consignee_gstin',
+        'default_consignee_state_code',
+        'default_dispatched_through',
+        'default_destination',
+        'default_terms_of_delivery',
+        'default_mode_of_payment',
     ];
 
     /**
@@ -47,6 +73,7 @@ class Customer extends Model
     protected function casts(): array
     {
         return [
+            'type' => CustomerType::class,
             'is_active' => 'boolean',
         ];
     }
@@ -66,6 +93,43 @@ class Customer extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
+    }
+
+    /**
+     * @param  Builder<Customer>  $query
+     * @return Builder<Customer>
+     */
+    public function scopeDealers(Builder $query): Builder
+    {
+        return $query->where('type', CustomerType::Dealer->value);
+    }
+
+    public function isDealer(): bool
+    {
+        return $this->type === CustomerType::Dealer;
+    }
+
+    /**
+     * The dispatch details to copy onto a new dealer invoice.
+     *
+     * Only the fields that genuinely repeat. The e-Way Bill, vehicle, LR-RR
+     * and order numbers differ on every trip, so defaulting them would put
+     * last week's lorry on this week's invoice.
+     *
+     * @return array<string, string|null>
+     */
+    public function invoiceDefaults(): array
+    {
+        return [
+            'consignee_name' => $this->default_consignee_name,
+            'consignee_address' => $this->default_consignee_address,
+            'consignee_gstin' => $this->default_consignee_gstin,
+            'consignee_state_code' => $this->default_consignee_state_code,
+            'dispatched_through' => $this->default_dispatched_through,
+            'destination' => $this->default_destination,
+            'terms_of_delivery' => $this->default_terms_of_delivery,
+            'mode_of_payment' => $this->default_mode_of_payment,
+        ];
     }
 
     public function hasInvoices(): bool

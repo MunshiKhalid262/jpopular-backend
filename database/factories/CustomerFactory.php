@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Enums\CustomerType;
 use App\Models\Customer;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
@@ -21,6 +22,7 @@ class CustomerFactory extends Factory
     public function definition(): array
     {
         return [
+            'type' => CustomerType::Customer->value,
             'name' => fake()->name(),
             'phone' => (string) fake()->numberBetween(7000000000, 9999999999),
             'email' => fake()->optional()->safeEmail(),
@@ -51,6 +53,20 @@ class CustomerFactory extends Factory
     {
         return $this->state(fn (): array => [
             'gstin' => '32'.Str::upper(Str::random(3)).'PS'.fake()->numberBetween(1000, 9999).'A1Z5',
+        ]);
+    }
+
+    /**
+     * A dealer, with the dispatch defaults that repeat on every supply.
+     */
+    public function dealer(): static
+    {
+        return $this->state(fn (): array => [
+            'type' => CustomerType::Dealer->value,
+            'default_dispatched_through' => 'BY ROAD',
+            'default_destination' => 'SANKARPUR',
+            'default_terms_of_delivery' => 'Ex-works',
+            'default_mode_of_payment' => '30 days credit',
         ]);
     }
 
