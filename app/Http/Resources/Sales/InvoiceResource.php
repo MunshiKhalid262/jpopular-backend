@@ -70,6 +70,13 @@ class InvoiceResource extends JsonResource
             'charges' => InvoiceChargeResource::collection($this->whenLoaded('charges')),
 
             /*
+             * The address as printed. Null means the document falls back to
+             * the customer's own address, which is what every invoice raised
+             * before this field existed does.
+             */
+            'party_address' => $this->party_address,
+
+            /*
              * Transport and dispatch. Always present for a uniform payload
              * shape; only a dealer invoice fills them in.
              *

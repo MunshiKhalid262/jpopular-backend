@@ -215,15 +215,32 @@
                     $partyLines = [];
 
                     if ($party) {
-                        if (filled($party->address)) {
-                            $partyLines[] = $party->address;
-                        }
+                        /*
+                         * The address the operator confirmed on this invoice,
+                         * falling back to the customer's own. An invoice raised
+                         * before that field existed has none, so it keeps
+                         * printing exactly what it printed before.
+                         *
+                         * It is kept as typed, line breaks and all, so the
+                         * operator decides how the address sits on the page.
+                         */
+                        if (filled($invoice->party_address)) {
+                            foreach (preg_split('/\R/', $invoice->party_address) as $line) {
+                                if (filled(trim($line))) {
+                                    $partyLines[] = trim($line);
+                                }
+                            }
+                        } else {
+                            if (filled($party->address)) {
+                                $partyLines[] = $party->address;
+                            }
 
-                        $place = collect([$party->city, $party->state, $party->pincode])
-                            ->filter()->implode(', ');
+                            $place = collect([$party->city, $party->state, $party->pincode])
+                                ->filter()->implode(', ');
 
-                        if (filled($place)) {
-                            $partyLines[] = $place;
+                            if (filled($place)) {
+                                $partyLines[] = $place;
+                            }
                         }
 
                         if (filled($party->phone)) {
@@ -633,12 +650,15 @@
                     @if ($gst && $invoice->customer?->gstin)
                         <div>GSTIN : {{ $invoice->customer->gstin }}</div>
                     @endif
-                    <div>{{ collect([
-                        $invoice->customer?->address,
-                        $invoice->customer?->city,
-                        $invoice->customer?->state,
-                        $invoice->customer?->pincode,
-                    ])->filter()->implode(', ') }}</div>
+                    {{-- One cell, so the typed line breaks become separators. --}}
+                    <div>{{ filled($invoice->party_address)
+                        ? trim(preg_replace('/\s*\R\s*/', ', ', $invoice->party_address))
+                        : collect([
+                            $invoice->customer?->address,
+                            $invoice->customer?->city,
+                            $invoice->customer?->state,
+                            $invoice->customer?->pincode,
+                        ])->filter()->implode(', ') }}</div>
                 </td>
             </tr>
 

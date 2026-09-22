@@ -40,6 +40,15 @@ class StoreInvoiceRequest extends FormRequest
 
             'invoice_date' => ['required', 'date'],
 
+            /*
+             * The address as printed on this invoice. Prefilled from the
+             * customer and editable here; editing it never writes back to the
+             * customer. Name, GSTIN and state code are NOT editable per
+             * invoice -- the state code decides the CGST/SGST vs IGST split, so
+             * a retyped one could make the document disagree with the tax.
+             */
+            'party_address' => ['sometimes', 'nullable', 'string', 'max:300'],
+
             // Transport and dispatch.
             'eway_bill_no' => ['sometimes', 'nullable', 'string', 'max:20'],
             'vehicle_no' => ['sometimes', 'nullable', 'string', 'max:20'],
@@ -198,6 +207,7 @@ class StoreInvoiceRequest extends FormRequest
     {
         return $this->safe()->only([
             'customer_id', 'invoice_type', 'tax_type', 'invoice_date', 'notes', 'terms',
+            'party_address',
             'eway_bill_no', 'vehicle_no', 'dispatched_through', 'destination',
             'lr_rr_no', 'lr_rr_date', 'delivery_note', 'delivery_note_date',
             'dispatch_doc_no', 'buyer_order_no', 'buyer_order_date',

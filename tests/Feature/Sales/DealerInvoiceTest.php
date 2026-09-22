@@ -159,6 +159,43 @@ class DealerInvoiceTest extends ApiTestCase
     }
 
     #[Test]
+    public function the_printed_address_can_be_overridden_on_one_invoice(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $invoice = $this->dealerInvoice();
+        $dealer = $invoice->customer;
+
+        $invoice->update(['party_address' => "PLOT 7, SITE B\nDURGAPUR, West Bengal 713216"]);
+
+        $html = $this->get("/api/v1/invoices/{$invoice->id}/preview")->assertOk()->getContent();
+
+        $this->assertStringContainsString('PLOT 7, SITE B', $html);
+        $this->assertStringContainsString('DURGAPUR, West Bengal 713216', $html);
+
+        // The dealer's own address gives way to it, rather than printing under
+        // it -- a one-off delivery address under the usual town is just wrong.
+        $this->assertStringNotContainsString(e((string) $dealer->address), $html);
+
+        // ...and the dealer record itself is untouched.
+        $this->assertNotSame($invoice->party_address, $dealer->fresh()->address);
+    }
+
+    #[Test]
+    public function an_invoice_without_an_override_still_prints_the_customer_address(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $invoice = $this->dealerInvoice();
+
+        // Every invoice raised before the override existed has a null here, so
+        // this is the path that must not change.
+        $this->assertNull($invoice->party_address);
+
+        $html = $this->get("/api/v1/invoices/{$invoice->id}/preview")->assertOk()->getContent();
+
+        $this->assertStringContainsString(e((string) $invoice->customer->address), $html);
+    }
+
+    #[Test]
     public function a_customer_invoice_carries_no_eway_bill_or_transport_block(): void
     {
         Sanctum::actingAs($this->admin());
