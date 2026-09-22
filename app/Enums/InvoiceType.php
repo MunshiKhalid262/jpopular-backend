@@ -37,7 +37,7 @@ enum InvoiceType: string
     }
 
     /**
-     * Whether the transport block, consignee and e-Way Bill page appear.
+     * Whether the transport block and e-Way Bill page appear.
      */
     public function carriesTransportDetails(): bool
     {

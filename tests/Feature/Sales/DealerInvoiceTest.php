@@ -75,9 +75,6 @@ class DealerInvoiceTest extends ApiTestCase
                 'vehicle_no' => 'WB41T3727',
                 'dispatched_through' => 'BY ROAD',
                 'destination' => 'SANKARPUR',
-                'consignee_name' => 'ACME MOTORS GODOWN',
-                'consignee_address' => 'SANKARPUR, West Bengal',
-                'consignee_gstin' => '19AMYPI5698G2Z0',
             ], $overrides['attributes'] ?? []),
             lines: $lines,
             actor: $actor,
@@ -138,7 +135,27 @@ class DealerInvoiceTest extends ApiTestCase
         $this->assertStringContainsString('SANKARPUR', $html);
         $this->assertStringContainsString('Dispatched through', $html);
         $this->assertStringContainsString('Consignee (Ship to)', $html);
-        $this->assertStringContainsString('ACME MOTORS GODOWN', $html);
+    }
+
+    #[Test]
+    public function ship_to_and_bill_to_name_the_same_party(): void
+    {
+        Sanctum::actingAs($this->admin());
+        $invoice = $this->dealerInvoice();
+        $buyer = $invoice->customer;
+
+        $html = $this->get("/api/v1/invoices/{$invoice->id}/preview")->assertOk()->getContent();
+
+        $this->assertStringContainsString('Consignee (Ship to)', $html);
+        $this->assertStringContainsString('Buyer (Bill to)', $html);
+
+        /*
+         * Both blocks are built from the customer, so the buyer's name appears
+         * under each heading and on the e-Way Bill page's "To" address. Before
+         * this, the consignee was a separate stored copy that could -- and in
+         * production did -- name the same company under a different spelling.
+         */
+        $this->assertSame(3, substr_count($html, e($buyer->name)));
     }
 
     #[Test]

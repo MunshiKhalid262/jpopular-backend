@@ -40,13 +40,6 @@ class StoreInvoiceRequest extends FormRequest
 
             'invoice_date' => ['required', 'date'],
 
-            // Consignee. Dealer invoices may ship somewhere other than the
-            // billing party.
-            'consignee_name' => ['sometimes', 'nullable', 'string', 'max:160'],
-            'consignee_address' => ['sometimes', 'nullable', 'string', 'max:300'],
-            'consignee_gstin' => ['sometimes', 'nullable', 'string', 'size:15'],
-            'consignee_state_code' => ['sometimes', 'nullable', 'string', 'regex:/^[0-9]{2}$/'],
-
             // Transport and dispatch.
             'eway_bill_no' => ['sometimes', 'nullable', 'string', 'max:20'],
             'vehicle_no' => ['sometimes', 'nullable', 'string', 'max:20'],
@@ -205,7 +198,6 @@ class StoreInvoiceRequest extends FormRequest
     {
         return $this->safe()->only([
             'customer_id', 'invoice_type', 'tax_type', 'invoice_date', 'notes', 'terms',
-            'consignee_name', 'consignee_address', 'consignee_gstin', 'consignee_state_code',
             'eway_bill_no', 'vehicle_no', 'dispatched_through', 'destination',
             'lr_rr_no', 'lr_rr_date', 'delivery_note', 'delivery_note_date',
             'dispatch_doc_no', 'buyer_order_no', 'buyer_order_date',

@@ -58,6 +58,9 @@ class CustomerFactory extends Factory
 
     /**
      * A dealer, with the dispatch defaults that repeat on every supply.
+     *
+     * The dealer is also the consignee, so there is nothing to seed for the
+     * ship-to party: it is this record.
      */
     public function dealer(): static
     {

@@ -53,10 +53,6 @@ class Invoice extends Model
         // Consignee and transport: operator-entered document detail, not
         // money. prices_include_tax is absent deliberately -- it is snapshotted
         // by the Action from settings, never chosen per request.
-        'consignee_name',
-        'consignee_address',
-        'consignee_gstin',
-        'consignee_state_code',
         'eway_bill_no',
         'vehicle_no',
         'dispatched_through',

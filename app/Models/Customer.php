@@ -57,10 +57,6 @@ class Customer extends Model
 
         // Dealer dispatch defaults, copied onto an invoice when the dealer is
         // chosen and editable there afterwards.
-        'default_consignee_name',
-        'default_consignee_address',
-        'default_consignee_gstin',
-        'default_consignee_state_code',
         'default_dispatched_through',
         'default_destination',
         'default_terms_of_delivery',
@@ -121,12 +117,11 @@ class Customer extends Model
     public function invoiceDefaults(): array
     {
         return [
-            'consignee_name' => $this->default_consignee_name,
-            'consignee_address' => $this->default_consignee_address,
-            'consignee_gstin' => $this->default_consignee_gstin,
-            'consignee_state_code' => $this->default_consignee_state_code,
             'dispatched_through' => $this->default_dispatched_through,
-            'destination' => $this->default_destination,
+            // Falls back to the city, which is where the goods go when nobody
+            // has said otherwise. A blank Destination on a dealer invoice is a
+            // gap the operator has to fill by hand every single time.
+            'destination' => $this->default_destination ?: $this->city,
             'terms_of_delivery' => $this->default_terms_of_delivery,
             'mode_of_payment' => $this->default_mode_of_payment,
         ];

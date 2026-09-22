@@ -12,9 +12,10 @@ namespace App\Enums;
  * rather than a parallel entity. A walk-in who starts buying in bulk becomes a
  * dealer by changing this, not by being re-keyed somewhere else.
  *
- * What a dealer adds is DEFAULTS: the consignee, transporter and destination
- * that repeat on every supply to them, so an operator is not retyping the same
- * dispatch details each time.
+ * What a dealer adds is DEFAULTS: the transporter, destination and payment
+ * terms that repeat on every supply to them, so an operator is not retyping the
+ * same dispatch details each time. The dealer is also the consignee -- goods go
+ * to the party that bought them -- so there is no second address to store.
  */
 enum CustomerType: string
 {

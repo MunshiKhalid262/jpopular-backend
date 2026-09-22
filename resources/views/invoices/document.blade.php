@@ -204,40 +204,62 @@
                     @endif
                 </div>
 
-                {{-- Consignee only on a dealer invoice, and only when the goods
-                     actually ship somewhere other than the billing party. --}}
-                @if ($dealer && $invoice->consignee_name)
+                @php
+                    /*
+                     * The consignee IS the buyer: J Popular delivers to the
+                     * dealer who bought the goods. Both blocks are built from
+                     * this one list, so the document cannot contradict itself
+                     * about who the party is.
+                     */
+                    $party = $invoice->customer;
+                    $partyLines = [];
+
+                    if ($party) {
+                        if (filled($party->address)) {
+                            $partyLines[] = $party->address;
+                        }
+
+                        $place = collect([$party->city, $party->state, $party->pincode])
+                            ->filter()->implode(', ');
+
+                        if (filled($place)) {
+                            $partyLines[] = $place;
+                        }
+
+                        if (filled($party->phone)) {
+                            $partyLines[] = 'Phone : '.$party->phone;
+                        }
+
+                        if ($gst && filled($party->gstin)) {
+                            $partyLines[] = 'GSTIN/UIN : '.$party->gstin;
+                        }
+
+                        if (filled($party->state) && filled($party->state_code)) {
+                            $partyLines[] = 'State Name : '.$party->state.', Code : '.$party->state_code;
+                        } elseif (filled($party->state_code)) {
+                            $partyLines[] = 'State Code : '.$party->state_code;
+                        }
+                    }
+                @endphp
+
+                {{-- Ship to, shown only on a dealer invoice. A counter bill is
+                     handed over with the goods, so it carries no consignee. --}}
+                @if ($dealer)
                     <div class="p3 bb">
                         <div class="lbl">Consignee (Ship to)</div>
-                        <div class="bold">{{ $invoice->consignee_name }}</div>
-                        @if ($invoice->consignee_address)
-                            <div>{{ $invoice->consignee_address }}</div>
-                        @endif
-                        @if ($gst && $invoice->consignee_gstin)
-                            <div>GSTIN/UIN : {{ $invoice->consignee_gstin }}</div>
-                        @endif
-                        @if ($invoice->consignee_state_code)
-                            <div>State Code : {{ $invoice->consignee_state_code }}</div>
-                        @endif
+                        <div class="bold">{{ $party?->name ?? 'Walk-in customer' }}</div>
+                        @foreach ($partyLines as $line)
+                            <div>{{ $line }}</div>
+                        @endforeach
                     </div>
                 @endif
 
                 <div class="p3">
                     <div class="lbl">{{ $dealer ? 'Buyer (Bill to)' : 'Billed to' }}</div>
-                    @if ($invoice->customer)
-                        <div class="bold">{{ $invoice->customer->name }}</div>
-                        @if ($invoice->customer->address)<div>{{ $invoice->customer->address }}</div>@endif
-                        <div>{{ collect([$invoice->customer->city, $invoice->customer->state, $invoice->customer->pincode])->filter()->implode(', ') }}</div>
-                        @if ($invoice->customer->phone)<div>Phone : {{ $invoice->customer->phone }}</div>@endif
-                        @if ($gst && $invoice->customer->gstin)
-                            <div>GSTIN/UIN : {{ $invoice->customer->gstin }}</div>
-                        @endif
-                        @if ($invoice->customer->state && $invoice->customer->state_code)
-                            <div>State Name : {{ $invoice->customer->state }}, Code : {{ $invoice->customer->state_code }}</div>
-                        @endif
-                    @else
-                        <div class="bold">Walk-in customer</div>
-                    @endif
+                    <div class="bold">{{ $party?->name ?? 'Walk-in customer' }}</div>
+                    @foreach ($partyLines as $line)
+                        <div>{{ $line }}</div>
+                    @endforeach
                 </div>
             </td>
 
@@ -605,12 +627,18 @@
                     <div>{{ collect([$seller->address_line1, $seller->city, $seller->state, $seller->pincode])->filter()->implode(', ') }}</div>
                 </td>
                 <td class="p3" colspan="2">
+                    {{-- The same party as Bill to and Ship to on page one. --}}
                     <div class="bold">To</div>
-                    <div>{{ $invoice->consignee_name ?: $invoice->customer?->name }}</div>
-                    @if ($gst && ($invoice->consignee_gstin ?: $invoice->customer?->gstin))
-                        <div>GSTIN : {{ $invoice->consignee_gstin ?: $invoice->customer?->gstin }}</div>
+                    <div>{{ $invoice->customer?->name }}</div>
+                    @if ($gst && $invoice->customer?->gstin)
+                        <div>GSTIN : {{ $invoice->customer->gstin }}</div>
                     @endif
-                    <div>{{ $invoice->consignee_address ?: $invoice->customer?->address }}</div>
+                    <div>{{ collect([
+                        $invoice->customer?->address,
+                        $invoice->customer?->city,
+                        $invoice->customer?->state,
+                        $invoice->customer?->pincode,
+                    ])->filter()->implode(', ') }}</div>
                 </td>
             </tr>
 

@@ -40,18 +40,36 @@ class DealerDirectoryTest extends ApiTestCase
             'name' => 'ACME MOTORS',
             'state_code' => '19',
             'gstin' => '19AMYPI5698G2Z0',
-            'default_consignee_name' => 'ACME GODOWN',
-            'default_consignee_address' => 'SANKARPUR, West Bengal',
-            'default_consignee_state_code' => '19',
             'default_dispatched_through' => 'BY ROAD',
             'default_destination' => 'SANKARPUR',
             'default_terms_of_delivery' => 'Ex-works',
+            'default_mode_of_payment' => '30 days credit',
         ])->assertStatus(201);
 
         $response->assertJsonPath('data.type', 'dealer');
         $response->assertJsonPath('data.default_dispatched_through', 'BY ROAD');
         $response->assertJsonPath('data.default_destination', 'SANKARPUR');
-        $response->assertJsonPath('data.default_consignee_name', 'ACME GODOWN');
+        $response->assertJsonPath('data.default_terms_of_delivery', 'Ex-works');
+    }
+
+    #[Test]
+    public function a_dealer_stores_no_separate_consignee(): void
+    {
+        Sanctum::actingAs($this->admin());
+
+        /*
+         * The dealer IS the consignee -- goods go to the party that bought
+         * them. A second copy of the same company could only ever drift out of
+         * step with the first, so the API does not accept one.
+         */
+        $response = $this->postJson('/api/v1/customers', [
+            'type' => 'dealer',
+            'name' => 'ACME MOTORS',
+            'default_consignee_name' => 'SOMEWHERE ELSE',
+        ])->assertStatus(201);
+
+        $response->assertJsonMissingPath('data.default_consignee_name');
+        $this->assertArrayNotHasKey('default_consignee_name', Customer::first()->getAttributes());
     }
 
     #[Test]
@@ -109,28 +127,19 @@ class DealerDirectoryTest extends ApiTestCase
     }
 
     #[Test]
-    public function the_consignee_state_code_is_validated(): void
-    {
-        Sanctum::actingAs($this->admin());
-
-        $this->postJson('/api/v1/customers', [
-            'name' => 'ACME',
-            'type' => 'dealer',
-            'default_consignee_state_code' => '1',
-        ])->assertStatus(422)->assertJsonValidationErrors('default_consignee_state_code');
-    }
-
-    #[Test]
     public function invoice_defaults_carry_only_the_repeating_fields(): void
     {
-        $dealer = Customer::factory()->dealer()->create([
-            'default_consignee_name' => 'ACME GODOWN',
-        ]);
+        $dealer = Customer::factory()->dealer()->create();
 
         $defaults = $dealer->invoiceDefaults();
 
-        $this->assertSame('ACME GODOWN', $defaults['consignee_name']);
         $this->assertSame('BY ROAD', $defaults['dispatched_through']);
+        $this->assertSame('SANKARPUR', $defaults['destination']);
+        $this->assertSame('Ex-works', $defaults['terms_of_delivery']);
+        $this->assertSame('30 days credit', $defaults['mode_of_payment']);
+
+        // The consignee is the dealer, so it is not a default to be copied.
+        $this->assertArrayNotHasKey('consignee_name', $defaults);
 
         /*
          * Per-trip fields must never be defaulted: pre-filling them would put
@@ -139,6 +148,22 @@ class DealerDirectoryTest extends ApiTestCase
         foreach (['eway_bill_no', 'vehicle_no', 'lr_rr_no', 'buyer_order_no', 'irn'] as $perTrip) {
             $this->assertArrayNotHasKey($perTrip, $defaults);
         }
+    }
+
+    #[Test]
+    public function the_destination_falls_back_to_the_dealer_city(): void
+    {
+        $dealer = Customer::factory()->dealer()->create([
+            'default_destination' => null,
+            'city' => 'KOLKATA',
+        ]);
+
+        /*
+         * Where else would the goods be going? Leaving it blank means the
+         * operator retypes the same town on every invoice, which is the chore
+         * dealers exist to remove.
+         */
+        $this->assertSame('KOLKATA', $dealer->invoiceDefaults()['destination']);
     }
 
     #[Test]

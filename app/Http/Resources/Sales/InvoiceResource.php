@@ -70,14 +70,12 @@ class InvoiceResource extends JsonResource
             'charges' => InvoiceChargeResource::collection($this->whenLoaded('charges')),
 
             /*
-             * Consignee and transport. Always present for a uniform payload
-             * shape; only a dealer invoice fills them in, and the document
-             * prints the block only when something is there.
+             * Transport and dispatch. Always present for a uniform payload
+             * shape; only a dealer invoice fills them in.
+             *
+             * No consignee: the goods go to the party that bought them, so the
+             * customer above is both bill-to and ship-to.
              */
-            'consignee_name' => $this->consignee_name,
-            'consignee_address' => $this->consignee_address,
-            'consignee_gstin' => $this->consignee_gstin,
-            'consignee_state_code' => $this->consignee_state_code,
 
             'eway_bill_no' => $this->eway_bill_no,
             'vehicle_no' => $this->vehicle_no,

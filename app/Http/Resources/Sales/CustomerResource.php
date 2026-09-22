@@ -45,10 +45,6 @@ class CustomerResource extends JsonResource
              * the dealer is chosen, and they stay editable on that invoice --
              * changing them there never writes back here.
              */
-            'default_consignee_name' => $this->default_consignee_name,
-            'default_consignee_address' => $this->default_consignee_address,
-            'default_consignee_gstin' => $this->default_consignee_gstin,
-            'default_consignee_state_code' => $this->default_consignee_state_code,
             'default_dispatched_through' => $this->default_dispatched_through,
             'default_destination' => $this->default_destination,
             'default_terms_of_delivery' => $this->default_terms_of_delivery,

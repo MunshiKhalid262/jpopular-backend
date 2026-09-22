@@ -118,10 +118,6 @@ class CustomerController extends Controller
              * decides whether the UI offers them, and storing a stray default
              * on a walk-in harms nothing.
              */
-            'default_consignee_name' => ['sometimes', 'nullable', 'string', 'max:160'],
-            'default_consignee_address' => ['sometimes', 'nullable', 'string', 'max:300'],
-            'default_consignee_gstin' => ['sometimes', 'nullable', 'string', 'size:15'],
-            'default_consignee_state_code' => ['sometimes', 'nullable', 'string', 'regex:/^[0-9]{2}$/'],
             'default_dispatched_through' => ['sometimes', 'nullable', 'string', 'max:120'],
             'default_destination' => ['sometimes', 'nullable', 'string', 'max:120'],
             'default_terms_of_delivery' => ['sometimes', 'nullable', 'string', 'max:200'],
@@ -129,8 +125,6 @@ class CustomerController extends Controller
         ], [
             'state_code.regex' => 'The state code must be the two-digit GST code, e.g. 19 for West Bengal.',
             'gstin.size' => 'A GSTIN is exactly 15 characters.',
-            'default_consignee_state_code.regex' => 'The consignee state code must be the two-digit GST code.',
-            'default_consignee_gstin.size' => 'A GSTIN is exactly 15 characters.',
         ]);
     }
 }
