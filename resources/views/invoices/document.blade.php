@@ -26,12 +26,13 @@
     $dealer = $doc->isDealer();
     $showHsn = $gst && $doc->hasHsnCodes();
     $showInclusive = $doc->showsInclusiveRate();
+    $showGstRate = $gst;
     $summary = $doc->taxSummary();
     $summaryTotals = $doc->taxSummaryTotals();
     $charges = $doc->charges();
 
-    // Sl, Description, [HSN], Qty, [Rate incl], Rate, per, Disc, Amount
-    $columns = 6 + ($showHsn ? 1 : 0) + ($showInclusive ? 1 : 0) + 1;
+    // Sl, Description, [HSN], [GST %], Qty, [Rate incl], Rate, per, Disc, Amount
+    $columns = 7 + ($showHsn ? 1 : 0) + ($showGstRate ? 1 : 0) + ($showInclusive ? 1 : 0);
 @endphp
 <!DOCTYPE html>
 <html lang="en">
@@ -341,13 +342,14 @@
         <tr>
             <th style="width:22px">Sl<br>No.</th>
             <th>Description of<br>Goods and Services</th>
-            @if ($showHsn)<th style="width:58px">HSN/SAC</th>@endif
-            <th style="width:58px">Quantity</th>
-            @if ($showInclusive)<th style="width:60px">Rate<br>(Incl. of Tax)</th>@endif
-            <th style="width:60px">Rate</th>
-            <th style="width:28px">per</th>
-            <th style="width:38px">Disc. %</th>
-            <th style="width:76px">Amount</th>
+            @if ($showHsn)<th style="width:56px">HSN/SAC</th>@endif
+            @if ($showGstRate)<th style="width:34px">GST %</th>@endif
+            <th style="width:54px">Quantity</th>
+            @if ($showInclusive)<th style="width:58px">Rate<br>(Incl. of Tax)</th>@endif
+            <th style="width:58px">Rate</th>
+            <th style="width:26px">per</th>
+            <th style="width:36px">Disc. %</th>
+            <th style="width:78px">Amount</th>
         </tr>
         </thead>
         <tbody>
@@ -357,16 +359,22 @@
                 {{-- Snapshot values: never the live product. --}}
                 <td class="br bold">{{ $item->product_name }}<div class="small" style="font-weight:normal">{{ $item->sku }}</div></td>
                 @if ($showHsn)<td class="br center">{{ $item->hsn_code ?? '—' }}</td>@endif
+                @if ($showGstRate)<td class="br center">{{ F::rate((string) $item->gst_rate) }} %</td>@endif
                 <td class="br right bold">{{ F::quantity((string) $item->quantity) }} {{ $item->unit }}</td>
                 @if ($showInclusive)
-                    <td class="br right">{{ F::amount((string) $item->unit_price_gross) }}</td>
+                    <td class="br right">{{ F::amount($doc->inclusiveUnitPrice($item)) }}</td>
                 @endif
                 <td class="br right">{{ F::amount((string) $item->unit_price) }}</td>
                 <td class="br center">{{ $item->unit }}</td>
+                {{-- A percentage, because the column is headed "Disc. %". The
+                     rupee figure has its own "Less : Discount" row below. --}}
                 <td class="br right">
-                    {{ bccomp((string) $item->discount_amount, '0', 2) > 0 ? F::amount((string) $item->discount_amount) : '' }}
+                    {{ ($pc = $doc->discountPercent($item)) !== null ? F::rate($pc).' %' : '' }}
                 </td>
-                <td class="br right bold">{{ F::amount((string) $item->line_total) }}</td>
+                {{-- The line value BEFORE discount and BEFORE tax, so this
+                     column adds up to the subtotal printed directly beneath it.
+                     The discount and the tax each have their own row. --}}
+                <td class="br right bold">{{ F::amount((string) $item->line_subtotal) }}</td>
             </tr>
         @empty
             <tr>
@@ -388,11 +396,14 @@
         @foreach ($charges as $charge)
             <tr>
                 <td class="bl br"></td>
-                <td class="br right ital bold" colspan="{{ $showHsn ? 1 : 1 }}">{{ $charge->description }}</td>
+                {{-- The rate rides in the description, as the trade prints it:
+                     "Insurance Charges on Sales (18%)". --}}
+                <td class="br right ital bold">{{ $doc->chargeDescription($charge) }}</td>
                 @if ($showHsn)<td class="br center">{{ $charge->hsn_code ?? '' }}</td>@endif
+                @if ($showGstRate)<td class="br center">{{ bccomp((string) $charge->gst_rate, '0', 2) > 0 ? F::rate((string) $charge->gst_rate).' %' : '' }}</td>@endif
                 <td class="br"></td>
                 @if ($showInclusive)<td class="br"></td>@endif
-                <td class="br right">{{ bccomp((string) $charge->gst_rate, '0', 2) > 0 ? F::rate((string) $charge->gst_rate).' %' : '' }}</td>
+                <td class="br"></td>
                 <td class="br"></td>
                 <td class="br"></td>
                 <td class="br right bold">{{ F::amount((string) $charge->taxable_amount) }}</td>
@@ -456,13 +467,13 @@
         <tfoot>
         <tr>
             <td class="b"></td>
-            <td class="b right bold" colspan="{{ $showHsn ? 2 : 1 }}">Total</td>
+            <td class="b right bold" colspan="{{ 1 + ($showHsn ? 1 : 0) + ($showGstRate ? 1 : 0) }}">Total</td>
             <td class="b right bold">{{ F::quantity($doc->totalQuantity()) }} {{ $doc->commonUnit() }}</td>
             @if ($showInclusive)<td class="b"></td>@endif
             <td class="b"></td>
             <td class="b"></td>
             <td class="b"></td>
-            <td class="b right bold" style="font-size:10px">&#8377; {{ F::amount((string) $invoice->grand_total) }}</td>
+            <td class="b right bold" style="font-size:10px; white-space:nowrap">&#8377; {{ F::amount((string) $invoice->grand_total) }}</td>
         </tr>
         </tfoot>
     </table>

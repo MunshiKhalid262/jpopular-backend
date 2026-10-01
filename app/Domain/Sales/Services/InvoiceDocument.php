@@ -75,16 +75,79 @@ final class InvoiceDocument
     }
 
     /**
-     * Whether any line was priced inclusive of tax, which decides if the
-     * "Rate (Incl. of Tax)" column is worth printing at all.
+     * Whether to print the "Rate (Incl. of Tax)" column.
+     *
+     * Every GST invoice, not only the tax-inclusive ones. It used to depend on
+     * `prices_include_tax`, so the same supply reached the dealer under two
+     * different column layouts depending on a setting only this office can see.
+     * The dealer comparing two of our invoices has no way to account for that.
      */
     public function showsInclusiveRate(): bool
     {
-        return $this->chargesGst()
-            && (bool) $this->invoice->prices_include_tax
-            && $this->lines()->contains(
-                fn ($item): bool => bccomp((string) $item->unit_price_gross, (string) $item->unit_price, 2) !== 0
-            );
+        return $this->chargesGst();
+    }
+
+    /**
+     * The per-unit price including GST, for the "Rate (Incl. of Tax)" column.
+     *
+     * Under inclusive pricing this is the price as entered and is read from the
+     * snapshot. Otherwise it is derived from the taxable rate and the rate the
+     * line was actually taxed at -- both snapshot values, so a historical
+     * invoice still prints what it charged.
+     *
+     * Display only: nothing here feeds a total.
+     */
+    public function inclusiveUnitPrice(InvoiceItem $item): string
+    {
+        $gross = (string) $item->unit_price_gross;
+        $net = (string) $item->unit_price;
+
+        if (bccomp($gross, $net, 2) !== 0) {
+            return $gross;
+        }
+
+        $multiplier = bcadd('1', bcdiv((string) $item->gst_rate, '100', 8), 8);
+
+        return bcadd(bcmul($net, $multiplier, 8), '0.005', 2);
+    }
+
+    /**
+     * The line discount as the percentage its column is headed with.
+     *
+     * Returns null when there is none, so the cell stays empty rather than
+     * printing a bare 0 the reader has to interpret.
+     */
+    public function discountPercent(InvoiceItem $item): ?string
+    {
+        $discount = (string) $item->discount_amount;
+        $base = (string) $item->line_subtotal;
+
+        if (bccomp($discount, '0', 2) <= 0 || bccomp($base, '0', 2) <= 0) {
+            return null;
+        }
+
+        return bcadd(bcmul(bcdiv($discount, $base, 8), '100', 8), '0.005', 2);
+    }
+
+    /**
+     * A charge's description with its GST rate, as the trade prints it:
+     * "Insurance Charges on Sales (18%)".
+     */
+    public function chargeDescription(InvoiceCharge $charge): string
+    {
+        $rate = (string) $charge->gst_rate;
+
+        if (! $this->chargesGst() || bccomp($rate, '0', 2) <= 0) {
+            return $charge->description;
+        }
+
+        // Already written in, as on a charge typed straight from a supplier
+        // invoice. Printing "(18%) (18%)" helps nobody.
+        if (str_contains($charge->description, '%')) {
+            return $charge->description;
+        }
+
+        return $charge->description.' ('.rtrim(rtrim(number_format((float) $rate, 2, '.', ''), '0'), '.').'%)';
     }
 
     public function chargesGst(): bool
