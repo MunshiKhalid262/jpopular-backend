@@ -170,7 +170,7 @@ class InvoiceApiTest extends ApiTestCase
     }
 
     #[Test]
-    public function a_finalized_invoice_cannot_be_updated_or_deleted(): void
+    public function a_finalized_invoice_cannot_be_updated(): void
     {
         Sanctum::actingAs($this->admin());
 
@@ -182,7 +182,13 @@ class InvoiceApiTest extends ApiTestCase
         $this->putJson("/api/v1/invoices/{$draft['id']}", $this->payload(['product' => $product]))
             ->assertStatus(403);
 
-        $this->deleteJson("/api/v1/invoices/{$draft['id']}")->assertStatus(403);
+        /*
+         * Deleting one IS allowed now, with the invoices.delete permission --
+         * it returns the stock and leaves the number unused. Editing is not:
+         * an issued document must not change under the customer who holds it.
+         * See InvoiceDeletionTest for what deletion unwinds.
+         */
+        $this->deleteJson("/api/v1/invoices/{$draft['id']}")->assertOk();
     }
 
     // ------------------------------------------------------------- cancel
@@ -236,7 +242,10 @@ class InvoiceApiTest extends ApiTestCase
             ->assertJsonPath('data.grand_total', '5900.00');
 
         $this->deleteJson("/api/v1/invoices/{$draft['id']}")->assertOk();
-        $this->assertSoftDeleted('invoices', ['id' => $draft['id']]);
+
+        // Gone, not soft-deleted: its lines are hard-deleted either way, so a
+        // surviving invoice row would be a shell with nothing in it.
+        $this->assertDatabaseMissing('invoices', ['id' => $draft['id']]);
     }
 
     // ------------------------------------------------------ list and show

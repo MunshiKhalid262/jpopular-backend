@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Sales;
 
 use App\Domain\Sales\Actions\CancelInvoice;
+use App\Domain\Sales\Actions\DeleteInvoice;
 use App\Domain\Sales\Actions\FinalizeInvoice;
 use App\Domain\Sales\Actions\ManageInvoice;
 use App\Domain\Sales\Data\InvoiceChargeInput;
@@ -111,13 +112,19 @@ class InvoiceController extends Controller
      * Deletes a DRAFT. A finalized invoice is cancelled instead, so its number
      * stays in the sequence.
      */
-    public function destroy(Invoice $invoice, ManageInvoice $action): JsonResponse
+    public function destroy(Request $request, Invoice $invoice, DeleteInvoice $action): JsonResponse
     {
         $this->authorize('delete', $invoice);
 
-        $action->delete($invoice);
+        $wasIssued = $invoice->invoice_number !== null;
 
-        return ApiResponse::success(['message' => 'Draft invoice deleted.']);
+        $action->handle($invoice, $request->user());
+
+        return ApiResponse::success([
+            'message' => $wasIssued
+                ? 'Invoice deleted. Its stock has been returned and its number stays unused.'
+                : 'Draft invoice deleted.',
+        ]);
     }
 
     /**

@@ -41,9 +41,17 @@ class InvoicePolicy
         return $actor->can(PermissionName::InvoicesCancel->value);
     }
 
+    /**
+     * Any status, not just a draft.
+     *
+     * Deleting a finalized invoice leaves a gap in the numbered series, which
+     * is why cancelling exists and is the safer route for a document that has
+     * already gone out. The permission is the gate; the decision is the
+     * operator's, and the confirmation says what it costs.
+     */
     public function delete(User $actor, Invoice $invoice): bool
     {
-        return $actor->can(PermissionName::InvoicesDelete->value) && $invoice->isDraft();
+        return $actor->can(PermissionName::InvoicesDelete->value);
     }
 
     /**
