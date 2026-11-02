@@ -50,6 +50,12 @@ class CustomerResource extends JsonResource
             'default_terms_of_delivery' => $this->default_terms_of_delivery,
             'default_mode_of_payment' => $this->default_mode_of_payment,
 
+            /*
+             * Only present when the query asked for it. The archive dialog
+             * uses it to say whether the record is attached to anything.
+             */
+            'invoice_count' => $this->whenCounted('invoices'),
+
             'archived_at' => $this->deleted_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

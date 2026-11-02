@@ -27,6 +27,9 @@ class CustomerController extends Controller
         $this->authorize('viewAny', Customer::class);
 
         $customers = Customer::query()
+            // Lets the archive dialog say what the customer is attached to
+            // instead of asking the operator to guess.
+            ->withCount('invoices')
             ->when($request->filled('search'), function ($query) use ($request): void {
                 $term = '%'.$request->string('search')->toString().'%';
 
@@ -57,7 +60,7 @@ class CustomerController extends Controller
     {
         $this->authorize('view', $customer);
 
-        return ApiResponse::success(new CustomerResource($customer));
+        return ApiResponse::success(new CustomerResource($customer->loadCount('invoices')));
     }
 
     public function store(Request $request): JsonResponse
