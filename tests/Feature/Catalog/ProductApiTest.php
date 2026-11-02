@@ -85,40 +85,72 @@ class ProductApiTest extends ApiTestCase
     // ---------------------------------------------------------------- SKU
 
     #[Test]
-    public function a_duplicate_sku_is_rejected(): void
+    public function two_products_can_share_a_code(): void
     {
         Sanctum::actingAs($this->admin());
-        Product::factory()->create(['sku' => 'TAKEN-SKU']);
+        Product::factory()->create(['sku' => 'YAKNEU60', 'name' => 'YAKUZA NEU 60V Red']);
 
-        $this->postJson('/api/v1/products', $this->validPayload(['sku' => 'TAKEN-SKU']))
-            ->assertStatus(422)
-            ->assertJsonStructure(['errors' => ['sku']]);
+        /*
+         * The same manufacturer code covers variants the shop stocks
+         * separately -- the same model in another colour. Refusing the second
+         * one forced the operator to invent a code the supplier does not use.
+         */
+        $this->postJson('/api/v1/products', $this->validPayload([
+            'sku' => 'YAKNEU60',
+            'name' => 'YAKUZA NEU 60V Blue',
+        ]))->assertStatus(201)->assertJsonPath('data.sku', 'YAKNEU60');
+
+        $this->assertSame(2, Product::where('sku', 'YAKNEU60')->count());
     }
 
     #[Test]
-    public function a_sku_cannot_be_reused_from_an_archived_product(): void
+    public function a_code_can_be_reused_from_an_archived_product(): void
     {
         Sanctum::actingAs($this->admin());
 
         $archived = Product::factory()->create(['sku' => 'HISTORIC-SKU']);
         $archived->delete();
 
-        // Strict policy: SKUs appear on historical invoices, so reuse would
-        // make an old document ambiguous.
+        // The old invoice keeps its own snapshot of the code, so reusing it
+        // cannot change what a historical document says.
         $this->postJson('/api/v1/products', $this->validPayload(['sku' => 'HISTORIC-SKU']))
-            ->assertStatus(422)
-            ->assertJsonStructure(['errors' => ['sku']]);
+            ->assertStatus(201);
     }
 
     #[Test]
-    public function sku_uniqueness_is_case_insensitive(): void
+    public function codes_differing_only_in_case_are_both_accepted(): void
     {
         Sanctum::actingAs($this->admin());
         Product::factory()->create(['sku' => 'Demo-Sku-1']);
 
         $this->postJson('/api/v1/products', $this->validPayload(['sku' => 'demo-sku-1']))
-            ->assertStatus(422)
-            ->assertJsonStructure(['errors' => ['sku']]);
+            ->assertStatus(201)
+            ->assertJsonPath('data.sku', 'demo-sku-1');
+    }
+
+    #[Test]
+    public function a_product_keeps_its_own_identity_when_codes_collide(): void
+    {
+        Sanctum::actingAs($this->admin());
+
+        $first = Product::factory()->create(['sku' => 'SHARED', 'name' => 'First']);
+
+        $id = $this->postJson('/api/v1/products', $this->validPayload([
+            'sku' => 'SHARED',
+            'name' => 'Second',
+        ]))->assertStatus(201)->json('data.id');
+
+        // Everything addresses a product by id, so a shared code must not make
+        // two products interchangeable.
+        $this->assertNotSame($first->id, $id);
+
+        $second = Product::findOrFail($id);
+        $this->assertSame('Second', $second->name);
+        $this->assertSame('First', $first->fresh()->name);
+
+        // And each keeps its own stock, which is the figure a shared code
+        // would be most damaging to confuse.
+        $this->assertNotSame($first->id, $second->id);
     }
 
     #[Test]

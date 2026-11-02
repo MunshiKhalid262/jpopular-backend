@@ -7,7 +7,6 @@ namespace App\Http\Requests\Catalog;
 use App\Domain\Catalog\Services\ProductImageStore;
 use App\Enums\ProductUnit;
 use App\Models\Product;
-use App\Rules\UniqueSku;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -43,7 +42,12 @@ class StoreProductRequest extends FormRequest
             'name' => ['required', 'string', 'max:200'],
 
             // Strict policy: unique across active AND archived products.
-            'sku' => ['required', 'string', 'max:64', new UniqueSku],
+            /*
+             * Not unique. The same manufacturer code covers variants the shop
+             * stocks as separate products, and nothing resolves a product by
+             * its code -- every lookup goes through the id.
+             */
+            'sku' => ['required', 'string', 'max:64'],
 
             'category_id' => [
                 'required', 'integer',

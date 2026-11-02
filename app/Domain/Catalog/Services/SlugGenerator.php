@@ -13,9 +13,7 @@ use Illuminate\Support\Str;
  * Derives a unique slug for categories and brands.
  *
  * Slugs are URL/lookup conveniences, not business identifiers, so a collision
- * is resolved by appending a counter rather than rejecting the request. SKU is
- * the opposite case -- it IS a business identifier, so a duplicate there is a
- * hard validation failure (see App\Rules\UniqueSku).
+ * is resolved by appending a counter rather than rejecting the request.
  *
  * Archived rows are included, because the unique index spans them.
  */

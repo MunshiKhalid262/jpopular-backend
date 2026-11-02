@@ -7,7 +7,6 @@ namespace App\Http\Requests\Catalog;
 use App\Domain\Catalog\Services\ProductImageStore;
 use App\Enums\ProductUnit;
 use App\Models\Product;
-use App\Rules\UniqueSku;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -36,7 +35,7 @@ class UpdateProductRequest extends FormRequest
 
         return [
             'name' => ['sometimes', 'required', 'string', 'max:200'],
-            'sku' => ['sometimes', 'required', 'string', 'max:64', new UniqueSku($id)],
+            'sku' => ['sometimes', 'required', 'string', 'max:64'],
 
             'category_id' => [
                 'sometimes', 'required', 'integer',
