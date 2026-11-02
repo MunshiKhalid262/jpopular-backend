@@ -82,7 +82,13 @@ final class DeleteInvoice
             $invoice->items()->delete();
             $invoice->forceDelete();
 
-            foreach (Product::query()->whereIn('id', $productIds)->get() as $product) {
+            /*
+             * withTrashed: an archived product can still be on the invoice
+             * being deleted -- archiving hides it from the catalog, it does
+             * not undo what it sold. Without this its movements go but its
+             * cached stock is never rebuilt, and the row drifts silently.
+             */
+            foreach (Product::withTrashed()->whereIn('id', $productIds)->get() as $product) {
                 $this->ledger->recalculate($product, fix: true);
             }
         });

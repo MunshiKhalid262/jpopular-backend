@@ -152,8 +152,11 @@ final class StockLedger
     public function recalculate(Product $product, bool $fix = false): array
     {
         return DB::transaction(function () use ($product, $fix): array {
+            // withTrashed for the same reason as lockProducts: an archived
+            // product still has a balance to settle, and firstOrFail would
+            // throw on one rather than reconciling it.
             /** @var Product $locked */
-            $locked = Product::query()
+            $locked = Product::withTrashed()
                 ->whereKey($product->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
@@ -196,7 +199,14 @@ final class StockLedger
         $unique = array_values(array_unique($productIds));
         sort($unique);
 
-        return Product::query()
+        /*
+         * withTrashed: archiving a product hides it from the catalog, it does
+         * not erase its stock history. An archived product still appears on
+         * the invoices that sold it, so the ledger has to be able to lock and
+         * settle its balance -- without this the lock silently matches nothing
+         * and the row is left to drift.
+         */
+        return Product::withTrashed()
             ->whereIn('id', $unique)
             ->orderBy('id')
             ->lockForUpdate()

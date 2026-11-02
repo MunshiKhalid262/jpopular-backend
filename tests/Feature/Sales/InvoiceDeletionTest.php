@@ -251,6 +251,33 @@ class InvoiceDeletionTest extends ApiTestCase
     }
 
     #[Test]
+    public function an_archived_product_still_gets_its_stock_back(): void
+    {
+        $actor = $this->admin();
+        Sanctum::actingAs($actor);
+
+        $product = $this->product();
+        $invoice = $this->finalized($product, $actor);
+
+        // Archived AFTER it sold, which is the normal way round -- a line is
+        // discontinued once the last of it has gone.
+        $product->delete();
+
+        $this->deleteJson("/api/v1/invoices/{$invoice->id}")->assertOk();
+
+        /*
+         * Product::query() hides archived rows, so reloading them that way
+         * left their movements deleted and their cached stock untouched. The
+         * drift was invisible until someone compared the two.
+         */
+        $fresh = Product::withTrashed()->findOrFail($product->id);
+        $ledger = (string) (StockMovement::where('product_id', $product->id)->sum('quantity') ?: '0');
+
+        $this->assertSame('10.000', $fresh->current_stock);
+        $this->assertSame(0, bccomp((string) $fresh->current_stock, $ledger, 3));
+    }
+
+    #[Test]
     public function deleting_still_needs_the_delete_permission(): void
     {
         $actor = $this->admin();
