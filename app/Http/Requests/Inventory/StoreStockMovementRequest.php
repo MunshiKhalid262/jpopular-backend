@@ -62,9 +62,16 @@ class StoreStockMovementRequest extends FormRequest
                 'numeric', 'min:0',
             ],
 
-            // Business date, which may differ from the insert time. Never in
-            // the future: stock cannot move before it happens.
-            'occurred_at' => ['sometimes', 'nullable', 'date', 'before_or_equal:now'],
+            /*
+             * The business date, which may differ from when the row was
+             * keyed. Past and future are both allowed: paperwork is written
+             * up after the fact, and a delivery can be booked before it lands.
+             *
+             * NOTE: the cached balance is SUM(quantity) with no date filter,
+             * so a future-dated movement counts towards stock immediately. The
+             * date records WHEN, it does not schedule the change.
+             */
+            'occurred_at' => ['sometimes', 'nullable', 'date'],
         ];
     }
 
@@ -78,7 +85,6 @@ class StoreStockMovementRequest extends FormRequest
             'quantity.regex' => 'The quantity must be a positive number with at most three decimal places.',
             'quantity.gt' => 'The quantity must be greater than zero.',
             'note.required' => 'A note is required for this movement type, so the change is auditable.',
-            'occurred_at.before_or_equal' => 'The movement date cannot be in the future.',
         ];
     }
 

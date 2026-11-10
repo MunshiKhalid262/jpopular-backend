@@ -417,17 +417,23 @@ class InventoryApiTest extends ApiTestCase
     }
 
     #[Test]
-    public function a_future_movement_date_is_refused(): void
+    public function a_future_movement_date_is_accepted(): void
     {
         Sanctum::actingAs($this->admin());
 
         $product = $this->product();
 
+        /*
+         * A delivery can be booked before it lands, so the date is not capped
+         * at today. It records WHEN, it does not schedule anything: the
+         * balance is SUM(quantity) with no date filter, so the stock counts
+         * from the moment the row is written.
+         */
         $this->postJson("/api/v1/products/{$product->id}/movements", [
             'type' => 'stock_in',
             'quantity' => '1.000',
             'occurred_at' => now()->addWeek()->toIso8601String(),
-        ])->assertStatus(422)->assertJsonValidationErrors('occurred_at');
+        ])->assertStatus(201);
     }
 
     // ---------------------------------------------------------- permissions

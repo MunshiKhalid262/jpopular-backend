@@ -24,6 +24,14 @@ Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
 
         Route::get('movements', [InventoryController::class, 'movements'])
             ->middleware('can:'.PermissionName::InventoryView->value)->name('movements');
+
+        /*
+         * The DATE only, and only on a movement an operator recorded. A
+         * quantity is never edited in place -- it is corrected with a
+         * compensating movement, so the mistake and the fix both stay visible.
+         */
+        Route::patch('movements/{movement}', [InventoryController::class, 'updateMovement'])
+            ->middleware('can:'.PermissionName::InventoryAdjust->value)->name('movements.update');
     });
 
     /*

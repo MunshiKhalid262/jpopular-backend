@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Inventory;
 
 use App\Domain\Inventory\Actions\RecordStockMovement;
+use App\Enums\StockMovementType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Inventory\StoreStockMovementRequest;
+use App\Http\Requests\Inventory\UpdateStockMovementRequest;
 use App\Http\Resources\Inventory\StockMovementResource;
 use App\Http\Resources\Inventory\StockSummaryResource;
 use App\Models\Product;
@@ -159,5 +161,36 @@ class InventoryController extends Controller
             'movement' => (new StockMovementResource($movement->load(['product:id,name,sku,unit', 'createdBy:id,name'])))->resolve(),
             'product' => (new StockSummaryResource($product))->resolve(),
         ], status: 201);
+    }
+
+    /**
+     * PATCH /inventory/movements/{movement} — correct the date only.
+     *
+     * Refused for a movement the ledger wrote itself. An invoice_sale takes
+     * its date from the invoice, so editing it here would leave the two
+     * disagreeing about when the goods went out, with nothing to say which is
+     * right. Correct the invoice instead and the movement follows.
+     *
+     * No balance is touched: the cached stock is SUM(quantity) regardless of
+     * what date each row carries.
+     */
+    public function updateMovement(
+        UpdateStockMovementRequest $request,
+        StockMovement $movement,
+    ): JsonResponse {
+        if (! in_array($movement->type->value, StockMovementType::manualTypes(), true)) {
+            return ApiResponse::error(
+                'This movement was recorded by an invoice, so its date comes from that invoice. Change the invoice date instead.',
+                status: 422,
+                code: 'MOVEMENT_NOT_EDITABLE',
+            );
+        }
+
+        $movement->occurred_at = $request->date('occurred_at');
+        $movement->save();
+
+        return ApiResponse::success(
+            new StockMovementResource($movement->load(['product:id,name,sku,unit', 'createdBy:id,name'])),
+        );
     }
 }
