@@ -269,6 +269,11 @@ final class DashboardMetrics
     {
         return StockMovement::query()
             ->with(['product:id,name,sku,unit', 'createdBy:id,name'])
+            // Same rule as the movement history and the report: an archived
+            // product is gone from the stock list, so its movements should not
+            // be the latest thing the dashboard shows -- nameless, because the
+            // relation resolves to null under the soft-delete scope.
+            ->whereHas('product')
             ->orderByDesc('occurred_at')
             ->orderByDesc('id')
             ->limit(self::RECENT_LIMIT)

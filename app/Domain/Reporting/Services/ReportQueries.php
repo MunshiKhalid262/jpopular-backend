@@ -199,6 +199,10 @@ final class ReportQueries
 
         return StockMovement::query()
             ->with(['product:id,name,sku,unit', 'createdBy:id,name'])
+            // Same rule as the movement history: a product that has been
+            // archived is gone from the stock list, so a report that still
+            // carried its movements would not reconcile with it.
+            ->whereHas('product')
             ->whereBetween('occurred_at', [$from, $to])
             ->when(
                 $request->filled('product_id'),

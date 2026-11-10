@@ -94,6 +94,16 @@ class InventoryController extends Controller
 
         $movements = StockMovement::query()
             ->with(['product:id,name,sku,unit', 'createdBy:id,name'])
+            /*
+             * Archived products drop out of the history with their product.
+             * The stock list already hides them, so leaving their movements
+             * here showed rows for something the rest of the app says does
+             * not exist -- with a dash where the name should be, because the
+             * relation resolves to null.
+             *
+             * product_id is NOT NULL, so this excludes nothing else.
+             */
+            ->whereHas('product')
             ->when(
                 $request->filled('product_id'),
                 fn ($query) => $query->where('product_id', $request->integer('product_id'))
